@@ -63,3 +63,11 @@ data/downloads/
 
 # Docker
 .dockerignore
+
+# Keys and credentials
+*.pem
+*.key
+*.pub
+id_*
+credentials.json
+
