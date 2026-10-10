@@ -1,0 +1,11 @@
+# Ukázkový Caddyfile pro nasazení na Azure VM s automatickým HTTPS
+# Nahraďte vaší Azure FQDN nebo doménou (např. volby2026.westeurope.cloudapp.azure.com)
+
+{$DOMAIN:localhost} {
+    encode gzip zstd
+
+    reverse_proxy mcp-volby:8088 {
+        # Zachování SSE streamu bez bufferování
+        flush_interval -1
+    }
+}

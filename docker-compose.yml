@@ -1,0 +1,44 @@
+services:
+  mcp-volby:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mcp-volby-2026
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8088}:${PORT:-8088}"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=${PORT:-8088}
+      - API_KEY=${API_KEY:-}
+      - CSU_BASE_URL=${CSU_BASE_URL:-https://volby.gov.cz}
+      - CACHE_TTL_SECONDS=${CACHE_TTL_SECONDS:-30}
+    volumes:
+      - election-data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-8088}/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # Volitelný reverzní proxy pro produkční nasazení na Azure VM (automatický Let's Encrypt HTTPS certifikát)
+  # Pro aktivaci odkomentujte následující blok a vytvořte Caddyfile
+  # caddy:
+  #   image: caddy:2-alpine
+  #   container_name: mcp-volby-caddy
+  #   restart: unless-stopped
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./Caddyfile:/etc/caddy/Caddyfile:ro
+  #     - caddy-data:/data
+  #     - caddy-config:/config
+  #   depends_on:
+  #     - mcp-volby
+
+volumes:
+  election-data:
+  # caddy-data:
+  # caddy-config:
