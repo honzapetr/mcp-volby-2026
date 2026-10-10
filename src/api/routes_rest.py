@@ -8,10 +8,12 @@ from fastapi import APIRouter, Depends, Query
 from src.config import settings
 from src.core.security import verify_auth
 from src.models import (
+    CoalitionAnalysisResponse,
     CountingProgressResponse,
     ElectionOverviewResponse,
     MunicipalResultResponse,
     SearchResultResponse,
+    SenateDistrictBreakdownResponse,
     SenateOverviewResponse,
 )
 from src.services.election_service import election_service
@@ -64,6 +66,17 @@ async def api_senat_district(obvod: str):
 
 
 @router.get(
+    "/api/senat/{obvod}/obce",
+    response_model=SenateDistrictBreakdownResponse,
+    tags=["Senát 2026"],
+    dependencies=[Depends(verify_auth)],
+)
+async def api_senat_district_breakdown(obvod: str):
+    """Detailní výsledky senátních voleb po obcích v rámci obvodu."""
+    return await election_service.get_senate_district_breakdown(obvod)
+
+
+@router.get(
     "/api/obce/{obec}",
     response_model=MunicipalResultResponse,
     tags=["Komunální volby 2026"],
@@ -72,6 +85,17 @@ async def api_senat_district(obvod: str):
 async def api_municipal(obec: str):
     """Výsledky voleb do zastupitelstva konkrétní obce/města dle názvu nebo kódu."""
     return await election_service.get_municipal_results(obec)
+
+
+@router.get(
+    "/api/obce/{obec}/koalice",
+    response_model=CoalitionAnalysisResponse,
+    tags=["Komunální volby 2026"],
+    dependencies=[Depends(verify_auth)],
+)
+async def api_coalition_scenarios(obec: str):
+    """Analýza povolebních koaličních scénářů a minimálních vítězných koalic (MWC) pro obec."""
+    return await election_service.get_coalition_scenarios(obec)
 
 
 @router.get(

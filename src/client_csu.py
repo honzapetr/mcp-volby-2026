@@ -139,8 +139,7 @@ class CSUClient:
 
     async def get_senat_obvod_obce(self, district_num: int) -> ET.Element:
         """Returns municipality results within a specific Senate district."""
-        num_str = f"{district_num:02d}"
-        url = f"{self.base_url}/appdata/senat/{settings.SENAT_ELECTION_CODE}/odata/obvody/vysledky_obce_obvod_{num_str}.xml"
+        url = f"{self.base_url}/appdata/senat/{settings.SENAT_ELECTION_CODE}/odata/obvody/vysledky_obce_obvod_{district_num}.xml"
         return await self.get_xml(url)
 
     async def get_kv_vysledky_cr(self) -> ET.Element:

@@ -1,15 +1,42 @@
-"""Integration tests for FastAPI application and MCP tools."""
-
+import xml.etree.ElementTree as ET
 import pytest
 from starlette.testclient import TestClient
 
+from src.client_csu import csu_client
 from src.server import app, handle_call_tool, handle_list_tools
+from tests.test_parsers import (
+    MOCK_KV_CR_XML,
+    MOCK_MUNICIPAL_XML,
+    MOCK_SENAT_XML,
+    MOCK_SENATE_BREAKDOWN_XML,
+)
 
 
 @pytest.fixture
 def client():
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture(autouse=True)
+def mock_csu_calls(monkeypatch):
+    """Mocks network calls to CSU to ensure reliable and fast offline tests."""
+    async def mock_senat_vysledky():
+        return ET.fromstring(MOCK_SENAT_XML)
+
+    async def mock_kv_vysledky_cr():
+        return ET.fromstring(MOCK_KV_CR_XML)
+
+    async def mock_kv_obec(kod):
+        return ET.fromstring(MOCK_MUNICIPAL_XML)
+
+    async def mock_senat_obvod_obce(district_num):
+        return ET.fromstring(MOCK_SENATE_BREAKDOWN_XML)
+
+    monkeypatch.setattr(csu_client, "get_senat_vysledky", mock_senat_vysledky)
+    monkeypatch.setattr(csu_client, "get_kv_vysledky_cr", mock_kv_vysledky_cr)
+    monkeypatch.setattr(csu_client, "get_kv_obec", mock_kv_obec)
+    monkeypatch.setattr(csu_client, "get_senat_obvod_obce", mock_senat_obvod_obce)
 
 
 def test_health_check(client):
@@ -32,13 +59,15 @@ def test_api_search(client):
 @pytest.mark.asyncio
 async def test_mcp_list_tools():
     tools = await handle_list_tools()
-    assert len(tools) >= 5
+    assert len(tools) >= 7
     tool_names = [t.name for t in tools]
     assert "get_election_overview" in tool_names
     assert "get_senate_results" in tool_names
     assert "get_municipal_results" in tool_names
     assert "search_municipality_or_district" in tool_names
     assert "get_live_counting_progress" in tool_names
+    assert "get_senate_district_breakdown" in tool_names
+    assert "get_coalition_scenarios" in tool_names
 
 
 @pytest.mark.asyncio
@@ -48,6 +77,22 @@ async def test_mcp_call_search_tool():
     assert res[0].type == "text"
     assert "582786" in res[0].text
     assert "Brno" in res[0].text
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_breakdown_and_coalition_tools():
+    # Test breakdown tool
+    res_b = await handle_call_tool("get_senate_district_breakdown", {"obvod": 3})
+    assert len(res_b) == 1
+    assert "Cheb" in res_b[0].text
+    assert "municipalities" in res_b[0].text
+
+    # Test coalition scenarios tool
+    res_c = await handle_call_tool("get_coalition_scenarios", {"obec": "Praha"})
+    assert len(res_c) == 1
+    assert "Praha hl.m." in res_c[0].text
+    assert "scenarios" in res_c[0].text
+    assert "majority_seats" in res_c[0].text
 
 
 @pytest.mark.asyncio
@@ -63,7 +108,7 @@ async def test_api_live_endpoints(client):
     res_se = client.get("/api/senat")
     assert res_se.status_code == 200
     data_se = res_se.json()
-    assert data_se["districts_total"] >= 27
+    assert len(data_se["districts"]) == 2  # from MOCK_SENAT_XML (Cheb and Louny)
 
     # Test senate specific district (Cheb - 3)
     res_cheb = client.get("/api/senat/Cheb")
@@ -71,6 +116,14 @@ async def test_api_live_endpoints(client):
     data_cheb = res_cheb.json()
     assert len(data_cheb["districts"]) == 1
     assert data_cheb["districts"][0]["district_number"] == 3
+    assert data_cheb["districts"][0]["lead_margin_votes"] == 4300
+
+    # Test senate district breakdown by municipalities
+    res_breakdown = client.get("/api/senat/Cheb/obce")
+    assert res_breakdown.status_code == 200
+    data_bd = res_breakdown.json()
+    assert data_bd["district_number"] == 3
+    assert data_bd["municipalities_total"] == 2
 
     # Test municipal for Praha (554782)
     res_praha = client.get("/api/obce/Praha")
@@ -78,7 +131,22 @@ async def test_api_live_endpoints(client):
     data_praha = res_praha.json()
     assert data_praha["municipality_name"] == "Praha hl.m."
     assert data_praha["total_seats"] == 65
+    assert data_praha["majority_seats"] == 33
+    assert data_praha["winner"] == "Koalice A"
+    assert data_praha["wasted_votes_pct"] == 3.00
     assert len(data_praha["parties"]) > 0
+
+    # Test coalition scenarios for Praha
+    res_coalition = client.get("/api/obce/Praha/koalice")
+    assert res_coalition.status_code == 200
+    data_co = res_coalition.json()
+    assert data_co["total_seats"] == 65
+    assert data_co["majority_seats"] == 33
+    assert len(data_co["scenarios"]) > 0
+    # First scenario should be minimal winning coalition
+    first_scen = data_co["scenarios"][0]
+    assert first_scen["total_seats"] >= 33
+    assert first_scen["is_minimal_winning"] is True
 
     # Test progress
     res_prog = client.get("/api/progress")
@@ -123,6 +191,8 @@ def test_jsonrpc_initialize_and_tools(client):
     tool_names = [t["name"] for t in data_list["result"]["tools"]]
     assert "get_election_overview" in tool_names
     assert "get_senate_results" in tool_names
+    assert "get_senate_district_breakdown" in tool_names
+    assert "get_coalition_scenarios" in tool_names
 
     # Test tools/call on /sse
     call_payload = {

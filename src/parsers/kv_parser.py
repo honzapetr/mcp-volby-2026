@@ -81,11 +81,44 @@ def parse_municipal_results(root: ET.Element) -> MunicipalResultResponse:
     # Sort parties: by votes descending, then seats won, then list number
     parties.sort(key=lambda p: (p.votes, p.seats_won, -p.list_number), reverse=True)
 
-    winner = parties[0].party_name if (parties and parties[0].votes > 0) else None
-
     # Check completeness
     is_completed = je_spocteno or (
         turnout.precincts_processed == turnout.precincts_total and turnout.precincts_total > 0
+    )
+
+    top_party_name = parties[0].party_name if (parties and parties[0].votes > 0) else None
+    winner = top_party_name if is_completed else None
+    leading_party = top_party_name if not is_completed else None
+
+    if voleno_zastup == 0 and parties:
+        voleno_zastup = sum(p.seats_won for p in parties)
+
+    # Calculate majority seats needed
+    majority_seats = (voleno_zastup // 2 + 1) if voleno_zastup > 0 else 0
+
+    # Calculate wasted votes %
+    if is_completed:
+        # After full counting, sum of vote % for parties that won 0 seats
+        wasted_votes_pct = round(
+            sum(p.votes_pct for p in parties if p.seats_won == 0),
+            2,
+        )
+    else:
+        # During counting, seats are not yet allocated (seats_won == 0 for all parties).
+        # Wasted votes are computed from parties failing the 5% legal threshold.
+        wasted_votes_pct = round(
+            sum(p.votes_pct for p in parties if p.votes_pct < 5.0),
+            2,
+        )
+
+    counting_status = (
+        "Sčítání dokončeno" if is_completed
+        else (
+            f"Probíhá sčítání ({turnout.precincts_processed}/{turnout.precincts_total} okrsků, "
+            f"{turnout.precincts_processed_pct:.1f} % - průběžně vede {leading_party or 'nikdo'})"
+            if turnout.precincts_processed > 0
+            else "Sčítání ještě nezačalo (0 okrsků)"
+        )
     )
 
     return MunicipalResultResponse(
@@ -98,6 +131,10 @@ def parse_municipal_results(root: ET.Element) -> MunicipalResultResponse:
         turnout=turnout,
         parties=parties,
         winner=winner,
+        leading_party=leading_party,
+        majority_seats=majority_seats,
+        wasted_votes_pct=wasted_votes_pct,
+        counting_status=counting_status,
     )
 
 

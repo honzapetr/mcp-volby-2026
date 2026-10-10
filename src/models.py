@@ -23,20 +23,33 @@ class SenateCandidateResult(BaseModel):
     last_name: str = Field(description="Příjmení kandidáta")
     title_pre: str = Field(default="", description="Titul před jménem")
     title_post: str = Field(default="", description="Titul za jménem")
+    party_name: Optional[str] = Field(default=None, description="Název volební strany / koalice")
+    nominating_party: Optional[str] = Field(default=None, description="Navrhující strana")
+    political_affiliation: Optional[str] = Field(default=None, description="Politická příslušnost")
     votes_round_1: int = Field(description="Počet hlasů v 1. kole")
     votes_pct_round_1: float = Field(description="Procento hlasů v 1. kole")
     elected_round_1: bool = Field(default=False, description="Zda byl zvolen již v 1. kole (>50 %)")
     advances_to_round_2: bool = Field(default=False, description="Zda postupuje do 2. kola")
+    votes_round_2: Optional[int] = Field(default=None, description="Počet hlasů ve 2. kole")
+    votes_pct_round_2: Optional[float] = Field(default=None, description="Procento hlasů ve 2. kole")
+    elected_round_2: Optional[bool] = Field(default=None, description="Zda byl zvolen ve 2. kole")
 
 
 class SenateDistrictResult(BaseModel):
     """Result for a specific Senate electoral district (senátní obvod)."""
     district_number: int = Field(description="Číslo senátního obvodu (1–81)")
     district_name: str = Field(description="Sídlo senátního obvodu")
-    turnout: TurnoutInfo = Field(description="Volební účast v obvodu")
+    turnout: TurnoutInfo = Field(description="Volební účast v obvodu (1. kolo)")
+    turnout_round_2: Optional[TurnoutInfo] = Field(default=None, description="Volební účast v obvodu (2. kolo)")
     candidates: List[SenateCandidateResult] = Field(description="Seznam kandidátů s výsledky")
     is_completed: bool = Field(description="Zda jsou již sečteny všechny okrsky v obvodu")
     status_summary: str = Field(description="Stručné textové shrnutí stavu obvodu")
+    lead_margin: Optional[dict] = Field(default=None, description="Rozdíl mezi 1. a 2. kandidátem {'votes': int, 'pct': float}")
+    cutoff_margin: Optional[dict] = Field(default=None, description="Rozdíl mezi 2. a 3. kandidátem {'votes': int, 'pct': float}")
+    lead_margin_votes: Optional[int] = Field(default=None, description="Náskok 1. před 2. kandidátem v hlasech")
+    lead_margin_pct: Optional[float] = Field(default=None, description="Náskok 1. před 2. kandidátem v procentních bodech")
+    cutoff_margin_votes: Optional[int] = Field(default=None, description="Náskok 2. před 3. kandidátem v hlasech")
+    cutoff_margin_pct: Optional[float] = Field(default=None, description="Náskok 2. před 3. kandidátem v procentních bodech")
 
 
 class SenateOverviewResponse(BaseModel):
@@ -70,7 +83,52 @@ class MunicipalResultResponse(BaseModel):
     generated_at: str = Field(description="Čas vygenerování dat ČSÚ")
     turnout: TurnoutInfo = Field(description="Volební účast v obci")
     parties: List[MunicipalPartyResult] = Field(description="Výsledky kandidujících stran")
-    winner: Optional[str] = Field(default=None, description="Vítězná strana dle počtu hlasů")
+    winner: Optional[str] = Field(default=None, description="Vítězná strana dle počtu hlasů (pouze po 100% sečtení)")
+    leading_party: Optional[str] = Field(default=None, description="Průběžně vedoucí strana během sčítání")
+    majority_seats: int = Field(default=0, description="Minimální počet mandátů pro většinu (total_seats // 2 + 1)")
+    wasted_votes_pct: float = Field(default=0.0, description="Součet % hlasů propadlých stranám s 0 mandáty")
+    counting_status: Optional[str] = Field(default=None, description="Indikace stavu sčítání")
+
+
+class MunicipalitySenateResult(BaseModel):
+    """Senate election results within a specific municipality."""
+    municipality_code: str = Field(description="Kód obce ČSÚ")
+    municipality_name: str = Field(description="Název obce")
+    turnout: TurnoutInfo = Field(description="Volební účast v obci")
+    candidates: List[SenateCandidateResult] = Field(description="Výsledky kandidátů v obci")
+    leader_name: Optional[str] = Field(default=None, description="Vítězný / vedoucí kandidát v této obci")
+
+
+class SenateDistrictBreakdownResponse(BaseModel):
+    """Detailed breakdown of Senate district votes across all municipalities."""
+    district_number: int = Field(description="Číslo senátního obvodu")
+    district_name: str = Field(description="Sídlo senátního obvodu")
+    generated_at: str = Field(description="Čas vygenerování dat ČSÚ")
+    municipalities_total: int = Field(description="Celkový počet obcí v obvodu")
+    municipalities_processed: int = Field(description="Počet sečtených obcí v obvodu")
+    municipalities: List[MunicipalitySenateResult] = Field(description="Výsledky za jednotlivé obce v obvodu")
+
+
+class CoalitionScenario(BaseModel):
+    """Potential governing coalition scenario in a municipal council."""
+    parties: List[str] = Field(description="Seznam stran tvořících koalici")
+    total_seats: int = Field(description="Celkový počet mandátů koalice")
+    seats_pct: float = Field(description="Procentuální podíl křesel v zastupitelstvu")
+    majority_margin: int = Field(description="Počet mandátů nad potřebnou většinu")
+    parties_count: int = Field(description="Počet stran v koalici")
+    is_minimal_winning: bool = Field(description="Zda jde o minimální vítěznou koalici (žádná strana není přebytečná)")
+
+
+class CoalitionAnalysisResponse(BaseModel):
+    """Analysis of municipal council coalition potential and minimal winning coalitions."""
+    municipality_code: str = Field(description="Kód obce")
+    municipality_name: str = Field(description="Název obce")
+    total_seats: int = Field(description="Celkový počet mandátů v zastupitelstvu")
+    majority_seats: int = Field(description="Potřebná většina mandátů (total_seats // 2 + 1)")
+    is_completed: bool = Field(description="Zda je sčítání v obci ukončeno")
+    single_party_majority: Optional[str] = Field(default=None, description="Strana s jednobarevnou většinou, pokud existuje")
+    scenarios: List[CoalitionScenario] = Field(description="Možné většinové koaliční scénáře seřazené dle stability")
+    status_message: Optional[str] = Field(default=None, description="Informativní stavová zpráva k analýze koalic")
 
 
 class SearchResultItem(BaseModel):

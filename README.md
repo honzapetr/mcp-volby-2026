@@ -87,11 +87,25 @@ V konfiguračním souboru Cursor MCP (`~/.cursor/mcp.json` nebo v nastavení IDE
 
 | Nástroj | Parametry | Popis |
 | :--- | :--- | :--- |
-| `get_election_overview` | *žádné* | Celkový přehled o sčítání v ČR: stav po 14:00, celková účast, % sečtených okrsků pro Senát a zastupitelstva. |
-| `get_senate_results` | `obvod` *(volitelný: str / int)* | Výsledky Senátu za všech 27 obvodů nebo konkrétní obvod (např. `"Cheb"`, `3`, `"Praha 5"`). Zobrazí hlasy, %, zvolení v 1. kole (>50 %) či postupující do 2. kola. |
-| `get_municipal_results` | `obec` *(povinný: str)* | Výsledky pro konkrétní město či obec (např. `"Praha"`, `"Brno"`, `"Ostrava"` nebo kód `"554782"`). Vrátí účast, rozdělení mandátů v zastupitelstvu a pořadí stran. |
-| `search_municipality_or_district` | `query` *(povinný)*, `limit` *(výchozí 15)* | Inteligentní vyhledávač obcí a senátních obvodů bez ohledu na diakritiku a velikost písmen. |
+| `get_election_overview` | *žádné* | Celkový přehled o sčítání v ČR: celková účast, % sečtených okrsků pro Senát (vč. 2. kola) a zastupitelstva. |
+| `get_senate_results` | `obvod` *(volitelný: str / int)* | Výsledky Senátu za všech 27 obvodů nebo konkrétní obvod (např. `"Cheb"`, `3`, `"Praha 5"`). Plná podpora **1. i 2. kola**, politických stran kandidátů (`party_name`, `nominating_party`), náskoku lídra (`lead_margin`) i odstupu pro postup (`cutoff_margin`). |
+| `get_senate_district_breakdown` | `obvod` *(povinný: str / int)* | Geografický rozpad výsledků v senátním obvodu po všech obcích v obvodu (včetně politických stran a lokálních lídrů obcí). |
+| `get_municipal_results` | `obec` *(povinný: str)* | Výsledky pro konkrétní obec či město ze všech 6 396 obcí a MČ v ČR. Vrátí účast, mandáty v zastupitelstvu, potřebnou většinu (`majority_seats`), míru propadlých hlasů (`wasted_votes_pct`) a korektního lídra (`leading_party` během sčítání, `winner` po sečtení). |
+| `get_coalition_scenarios` | `obec` *(povinný: str)* | Povolební koaliční matematika pro zastupitelstvo: jednobarevné většiny a minimální vítězné koalice (**MWC** dle Rikerovy teorie). |
+| `search_municipality_or_district` | `query` *(povinný)*, `limit` *(výchozí 15)* | Inteligentní vyhledávač všech 6 396 obcí, městských částí a 27 senátních obvodů bez ohledu na diakritiku a velikost písmen. |
 | `get_live_counting_progress` | *žádné* | Telemetrie a rychlost sčítání: tempo zpracování okrsků a textová zpráva o aktuálním průběhu. |
+
+---
+
+## 🧠 AI Skill: Analýza voleb v ČR (`czech-elections-analyst`)
+
+Pro pokročilé AI agenty a asistenty (Google Antigravity, Cursor, Claude Code) je v repozitáři připraven odborný politologický a datový skill:
+* **Umístění skillu:** [`.gemini/skills/czech-elections-analyst/SKILL.md`](.gemini/skills/czech-elections-analyst/SKILL.md)
+* **Klíčové schopnosti a protokoly skillu:**
+  - **Mitigace sčítacího zkreslení (Counting Bias Guardrails):** Striktní pravidla pro interpretaci dat mezi 14:00–16:30 (venkovské malé okrsky) a 17:00–21:00 (velká města s panašováním) bránící předčasnému vyhlašování vítězů.
+  - **Koaliční modelování (Riker MWC):** Výpočet minimálních vítězných koalic a zákonné většiny $\lfloor S/2 \rfloor + 1$.
+  - **Matematika 2. kola Senátu:** Výpočet `cutoff_margin` (ohrožení postupu) a `lead_margin` (dominance lídra) a ošetření remízy.
+* **Instrukce pro AI agenty:** Viz také [`AGENTS.md`](AGENTS.md) v kořeni repozitáře.
 
 ---
 

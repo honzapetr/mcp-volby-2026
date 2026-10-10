@@ -99,6 +99,43 @@ async def handle_list_tools() -> list[Tool]:
                 "properties": {},
             },
         ),
+        Tool(
+            name="get_senate_district_breakdown",
+            description=(
+                "Získá detailní rozpad výsledků voleb do Senátu 2026 po jednotlivých obcích v daném senátním obvodu. "
+                "Umožňuje analyzovat geografické rozdíly v podpoře kandidátů mezi městy a obcemi uvnitř obvodu. "
+                "Parametr 'obvod': číslo obvodu (např. 3) nebo název sídla (např. 'Cheb', 'Praha 5')."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "obvod": {
+                        "type": ["string", "integer"],
+                        "description": "Číslo senátního obvodu (např. 3) nebo název sídla (např. 'Cheb').",
+                    }
+                },
+                "required": ["obvod"],
+            },
+        ),
+        Tool(
+            name="get_coalition_scenarios",
+            description=(
+                "Vypočítá možné povolební většinové koaliční scénáře pro zastupitelstvo dané obce či města. "
+                "Identifikuje minimální vítězné koalice (Minimal Winning Coalitions - MWC, kde žádná strana není přebytečná), "
+                "případnou jednobarevnou většinu a potřebný počet mandátů k většině (total_seats // 2 + 1). "
+                "Parametr 'obec': název obce (např. 'Praha', 'Brno') nebo 6místný kód obce ČSÚ (např. '554782')."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "obec": {
+                        "type": "string",
+                        "description": "Název obce (např. 'Praha', 'Brno') nebo 6místný kód obce ČSÚ (např. '554782').",
+                    }
+                },
+                "required": ["obec"],
+            },
+        ),
     ]
 
 
@@ -130,6 +167,20 @@ async def handle_call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         elif name == "get_live_counting_progress":
             res = await election_service.get_progress()
+            return [TextContent(type="text", text=res.model_dump_json(indent=2))]
+
+        elif name == "get_senate_district_breakdown":
+            obvod = arguments.get("obvod")
+            if obvod is None:
+                return [TextContent(type="text", text="Chyba: Chybí povinný parametr 'obvod'.")]
+            res = await election_service.get_senate_district_breakdown(obvod)
+            return [TextContent(type="text", text=res.model_dump_json(indent=2))]
+
+        elif name == "get_coalition_scenarios":
+            obec = arguments.get("obec")
+            if not obec:
+                return [TextContent(type="text", text="Chyba: Chybí povinný parametr 'obec'.")]
+            res = await election_service.get_coalition_scenarios(obec)
             return [TextContent(type="text", text=res.model_dump_json(indent=2))]
 
         else:

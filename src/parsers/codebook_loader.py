@@ -64,7 +64,7 @@ MAJOR_CITIES: List[Tuple[str, str, str, str]] = [
     # (code, name, district_nuts, description)
     ("554782", "Praha", "CZ0100", "Hlavní město Praha (statutární město a kraj)"),
     ("582786", "Brno", "CZ0642", "Statutární město Brno (Jihomoravský kraj)"),
-    ("555134", "Ostrava", "CZ0806", "Statutární město Ostrava (Moravskoslezský kraj)"),
+    ("554821", "Ostrava", "CZ0806", "Statutární město Ostrava (Moravskoslezský kraj)"),
     ("554791", "Plzeň", "CZ0323", "Statutární město Plzeň (Plzeňský kraj)"),
     ("563889", "Liberec", "CZ0513", "Statutární město Liberec (Liberecký kraj)"),
     ("500496", "Olomouc", "CZ0712", "Statutární město Olomouc (Olomoucký kraj)"),
@@ -90,8 +90,8 @@ MAJOR_CITIES: List[Tuple[str, str, str, str]] = [
     ("512800", "Přerov", "CZ0714", "Statutární město Přerov (Olomoucký kraj)"),
     ("598810", "Třinec", "CZ0802", "Statutární město Třinec (Moravskoslezský kraj)"),
     ("529303", "Benešov", "CZ0201", "Město Benešov (Středočeský kraj)"),
-    ("538523", "Kolín", "CZ0204", "Město Kolín (Středočeský kraj)"),
-    ("533165", "Kutná Hora", "CZ0205", "Město Kutná Hora (Středočeský kraj)"),
+    ("533165", "Kolín", "CZ0204", "Město Kolín (Středočeský kraj)"),
+    ("533955", "Kutná Hora", "CZ0205", "Město Kutná Hora (Středočeský kraj)"),
     ("535672", "Nymburk", "CZ0208", "Město Nymburk (Středočeský kraj)"),
     ("539911", "Příbram", "CZ020B", "Město Příbram (Středočeský kraj)"),
     ("541290", "Rakovník", "CZ020C", "Město Rakovník (Středočeský kraj)"),
@@ -111,10 +111,10 @@ MAJOR_CITIES: List[Tuple[str, str, str, str]] = [
     ("595209", "Žďár nad Sázavou", "CZ0635", "Město Žďár nad Sázavou (Kraj Vysočina)"),
     ("584444", "Břeclav", "CZ0644", "Město Břeclav (Jihomoravský kraj)"),
     ("586021", "Hodonín", "CZ0645", "Město Hodonín (Jihomoravský kraj)"),
-    ("593711", "Vyškov", "CZ0646", "Město Vyškov (Jihomoravský kraj)"),
+    ("592889", "Vyškov", "CZ0646", "Město Vyškov (Jihomoravský kraj)"),
     ("593711", "Znojmo", "CZ0647", "Město Znojmo (Jihomoravský kraj)"),
-    ("535419", "Jeseník", "CZ0711", "Město Jeseník (Olomoucký kraj)"),
-    ("538523", "Šumperk", "CZ0715", "Město Šumperk (Olomoucký kraj)"),
+    ("536385", "Jeseník", "CZ0711", "Město Jeseník (Olomoucký kraj)"),
+    ("523704", "Šumperk", "CZ0715", "Město Šumperk (Olomoucký kraj)"),
     ("591939", "Kroměříž", "CZ0721", "Město Kroměříž (Zlínský kraj)"),
     ("592005", "Uherské Hradiště", "CZ0722", "Město Uherské Hradiště (Zlínský kraj)"),
     ("542385", "Vsetín", "CZ0723", "Město Vsetín (Zlínský kraj)"),
@@ -129,6 +129,7 @@ class CodebookIndex:
     def __init__(self):
         self.municipalities: Dict[str, SearchResultItem] = {}  # code -> item
         self.senate_districts: Dict[int, SearchResultItem] = {}  # district_num -> item
+        self.senate_candidates: Dict[Tuple[int, int], Dict[str, str]] = {}  # (district, cand_num) -> info
         self._initialized = False
 
     def initialize_defaults(self):
@@ -162,30 +163,117 @@ class CodebookIndex:
             len(self.municipalities),
         )
 
+    async def load_senate_candidates(self):
+        """Optionally loads candidate party affiliations from CSU Senate registry (serk.json)."""
+        candidate_urls = [
+            f"{settings.CSU_BASE_URL}/opendata/senat/SE2026reg20261007_json.zip",
+            f"{settings.CSU_BASE_URL}/opendata/senat/{settings.SENAT_ELECTION_CODE}/SE2026reg20261007_json.zip",
+            f"{settings.CSU_BASE_URL}/opendata/se2026/SE2026reg20261007_json.zip",
+            "https://volby.cz/opendata/se2026/SE2026reg20261007_json.zip",
+        ]
+        data = None
+        for url in candidate_urls:
+            try:
+                data = await csu_client.get_zip_json(url, "serk.json", ttl=86400)
+                if data:
+                    break
+            except Exception:
+                continue
+
+        if not data:
+            return
+
+        items = (data.get("polozky") or data.get("položky") or []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+        count = 0
+        for item in items:
+            obvod_val = item.get("OBVOD", item.get("obvod", item.get("CISLO_OBVODU", 0)))
+            ckand_val = item.get("CKAND", item.get("POR_CISLO", item.get("poradove_cislo", item.get("PORADOVE_CISLO", item.get("KANDIDAT", 0)))))
+            try:
+                obvod = int(obvod_val)
+                ckand = int(ckand_val)
+            except (ValueError, TypeError):
+                continue
+
+            first_name = item.get("JMENO", item.get("jmeno", ""))
+            last_name = item.get("PRIJMENI", item.get("prijmeni", ""))
+            title_pre = item.get("TITULPRED", item.get("titulpred", ""))
+            title_post = item.get("TITULZA", item.get("titulza", ""))
+
+            party_name = item.get("NAZEV_VSTR", item.get("NAZ_VSTR", item.get("VSTRANA_NAZEV", item.get("NAZEV_STRANY", ""))))
+            nom_party = item.get("NAZEV_NSTR", item.get("NAZ_NSTR", item.get("NAVRH_STR_NAZEV", item.get("NAVRH_STRANA", ""))))
+            pol_aff = item.get("NAZEV_PSTR", item.get("NAZ_PSTR", item.get("POL_PRISL_NAZEV", item.get("POL_PRISL", ""))))
+
+            if obvod and ckand:
+                self.senate_candidates[(obvod, ckand)] = {
+                    "first_name": str(first_name or ""),
+                    "last_name": str(last_name or ""),
+                    "title_pre": str(title_pre or ""),
+                    "title_post": str(title_post or ""),
+                    "party_name": str(party_name or ""),
+                    "nominating_party": str(nom_party or ""),
+                    "political_affiliation": str(pol_aff or ""),
+                }
+                count += 1
+
+        logger.info("Loaded %d Senate candidates from CSU open data (serk.json).", count)
+
+    def get_candidate_affiliation(self, district_num: int, candidate_num: int) -> Dict[str, str]:
+        """Returns candidate party affiliation info if available."""
+        return self.senate_candidates.get((district_num, candidate_num), {
+            "first_name": "",
+            "last_name": "",
+            "title_pre": "",
+            "title_post": "",
+            "party_name": "",
+            "nominating_party": "",
+            "political_affiliation": "",
+        })
+
     async def load_remote_codebooks(self):
         """Optionally loads complete nationwide municipality list from CSU open data."""
         try:
             self.initialize_defaults()
-            url = f"{settings.CSU_BASE_URL}/opendata/{settings.KV_VERSION}/KV2026ciselniky20261007_json.zip"
-            data = await csu_client.get_zip_json(url, "kvcoco.json", ttl=86400)
-            items = data.get("položky", []) if isinstance(data, dict) else []
+            kvcoco_urls = [
+                f"{settings.CSU_BASE_URL}/opendata/{settings.KV_VERSION}/KV2026ciselniky20261007_json.zip",
+                f"https://volby.cz/opendata/{settings.KV_VERSION}/KV2026ciselniky20261007_json.zip",
+            ]
+            data = None
+            for url in kvcoco_urls:
+                try:
+                    data = await csu_client.get_zip_json(url, "kvcoco.json", ttl=86400)
+                    if data:
+                        break
+                except Exception:
+                    continue
+
+            if not data:
+                return
+
+            items = (data.get("polozky") or data.get("položky") or []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
             count_added = 0
             for item in items:
-                kod = str(item.get("KODZASTUP", item.get("kód", ""))).strip().zfill(6)
+                raw_kod = item.get("KODZASTUP", item.get("kód", item.get("kod", "")))
+                kod = str(raw_kod).strip().zfill(6)
                 nazev = item.get("NAZEVZAST", "")
                 if not nazev and isinstance(item.get("název"), dict):
                     nazev = item["název"].get("cs", "")
-                nuts = str(item.get("NUTS", ""))
+                elif not nazev and isinstance(item.get("nazev"), dict):
+                    nazev = item["nazev"].get("cs", "")
+                elif not nazev:
+                    nazev = str(item.get("název", item.get("nazev", ""))).strip()
+                nuts = str(item.get("NUTS", item.get("nuts", "")))
 
-                if kod and nazev:
-                    self.municipalities[kod] = SearchResultItem(
-                        item_type="obec",
-                        code=kod,
-                        name=nazev,
-                        district_nuts=nuts if nuts else None,
-                        description=f"Obec / zastupitelstvo {nazev} (kód {kod})",
-                    )
-                    count_added += 1
+                if kod and nazev and kod != "000000":
+                    # Protect curated MAJOR_CITIES clean names from being overwritten by verbose official names
+                    if kod not in self.municipalities:
+                        self.municipalities[kod] = SearchResultItem(
+                            item_type="obec",
+                            code=kod,
+                            name=nazev,
+                            district_nuts=nuts if nuts else None,
+                            description=f"Obec / zastupitelstvo {nazev} (kód {kod})",
+                        )
+                        count_added += 1
 
             logger.info("Loaded %d additional municipalities from CSU open data.", count_added)
         except Exception as exc:
@@ -193,6 +281,12 @@ class CodebookIndex:
                 "Could not load extended remote codebooks from CSU (%s). Using bundled defaults.",
                 exc,
             )
+
+        # Also load Senate candidate affiliations
+        try:
+            await self.load_senate_candidates()
+        except Exception as exc:
+            logger.warning("Could not load Senate candidates (%s).", exc)
 
     def search(self, query: str, limit: int = 15) -> SearchResultResponse:
         """Searches across municipalities and Senate districts."""
@@ -244,8 +338,9 @@ class CodebookIndex:
         s_id = str(identifier).strip()
         if s_id.isdigit():
             num = int(s_id)
-            if 1 <= num <= 81:
+            if num in self.senate_districts:
                 return num
+            return None
 
         clean_name = normalize_text(s_id)
         for num, item in self.senate_districts.items():
