@@ -17,6 +17,17 @@ class Settings(BaseSettings):
     PORT: int = 8088
     API_KEY: str | None = None
     CORS_ORIGINS: List[str] = ["*"]
+    LOG_LEVEL: str = "INFO"
+
+    # Application metadata
+    APP_TITLE: str = "MCP Server pro Volby 2026 v ČR"
+    APP_DESCRIPTION: str = (
+        "Model Context Protocol (MCP) server a REST API pro živé výsledky voleb v České republice 2026 "
+        "(Volby do Senátu Parlamentu ČR a volby do zastupitelstev obcí) ze sčítání ČSÚ (volby.cz / volby.gov.cz)."
+    )
+    APP_VERSION: str = "1.0.0"
+    MCP_SERVER_NAME: str = "volby-cr-2026"
+    DEFAULT_SEARCH_LIMIT: int = 15
 
     # Official CSU (Czech Statistical Office) election endpoints
     CSU_BASE_URL: str = "https://volby.gov.cz"
