@@ -376,10 +376,125 @@ async def api_progress():
     return await service_get_progress()
 
 
-# MCP Protocol Endpoints (SSE Transport)
+# JSON-RPC 2.0 Dispatcher for Streamable HTTP MCP Clients (e.g. Antigravity IDE, Cursor)
+async def dispatch_jsonrpc(req: dict) -> Optional[dict]:
+    """Processes a single JSON-RPC 2.0 request or notification."""
+    jsonrpc_ver = req.get("jsonrpc", "2.0")
+    req_id = req.get("id")
+    method = req.get("method")
+    params = req.get("params") or {}
+
+    # Notifications do not have an "id" and do not expect a response
+    is_notification = req_id is None
+
+    if method == "initialize":
+        client_proto = params.get("protocolVersion", "2024-11-05")
+        result = {
+            "protocolVersion": client_proto,
+            "capabilities": {
+                "tools": {
+                    "listChanged": False
+                }
+            },
+            "serverInfo": {
+                "name": "volby-cr-2026",
+                "version": "1.0.0"
+            }
+        }
+        return {"jsonrpc": jsonrpc_ver, "id": req_id, "result": result}
+
+    elif method in ("notifications/initialized", "notifications/cancelled"):
+        return None
+
+    elif method == "ping":
+        return {"jsonrpc": jsonrpc_ver, "id": req_id, "result": {}}
+
+    elif method == "tools/list":
+        tools = await handle_list_tools()
+        tools_data = [t.model_dump() for t in tools]
+        return {"jsonrpc": jsonrpc_ver, "id": req_id, "result": {"tools": tools_data}}
+
+    elif method == "tools/call":
+        tool_name = params.get("name", "")
+        arguments = params.get("arguments") or {}
+        content_items = await handle_call_tool(tool_name, arguments)
+        content_data = [c.model_dump() for c in content_items]
+        return {
+            "jsonrpc": jsonrpc_ver,
+            "id": req_id,
+            "result": {
+                "content": content_data,
+                "isError": False
+            }
+        }
+
+    elif method == "prompts/list":
+        return {"jsonrpc": jsonrpc_ver, "id": req_id, "result": {"prompts": []}}
+
+    elif method == "resources/list":
+        return {"jsonrpc": jsonrpc_ver, "id": req_id, "result": {"resources": []}}
+
+    elif method == "resources/templates/list":
+        return {"jsonrpc": jsonrpc_ver, "id": req_id, "result": {"resourceTemplates": []}}
+
+    else:
+        if is_notification:
+            return None
+        return {
+            "jsonrpc": jsonrpc_ver,
+            "id": req_id,
+            "error": {
+                "code": -32601,
+                "message": f"Method '{method}' not found"
+            }
+        }
+
+
+async def handle_jsonrpc_endpoint(request: Request) -> Response:
+    """Handles Streamable HTTP / JSON-RPC 2.0 MCP requests."""
+    if settings.API_KEY:
+        auth_header = request.headers.get("Authorization")
+        auth_token = None
+        if auth_header and auth_header.startswith("Bearer "):
+            auth_token = auth_header[7:].strip()
+        else:
+            auth_token = request.query_params.get("token")
+        if auth_token != settings.API_KEY:
+            raise HTTPException(status_code=403, detail="Neplatný autorizační token pro MCP.")
+
+    import uuid
+    session_id = request.headers.get("mcp-session-id") or request.query_params.get("session_id") or str(uuid.uuid4())
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Neplatný JSON formát v těle požadavku.")
+
+    resp_headers = {
+        "mcp-session-id": session_id,
+        "content-type": "application/json"
+    }
+
+    if isinstance(body, list):
+        responses = []
+        for item in body:
+            res = await dispatch_jsonrpc(item)
+            if res is not None:
+                responses.append(res)
+        return JSONResponse(content=responses, headers=resp_headers)
+    elif isinstance(body, dict):
+        res = await dispatch_jsonrpc(body)
+        if res is None:
+            return Response(status_code=204, headers=resp_headers)
+        return JSONResponse(content=res, headers=resp_headers)
+    else:
+        raise HTTPException(status_code=400, detail="Očekáván JSON objekt nebo pole.")
+
+
+# MCP Protocol Endpoints (Dual Transport: SSE & Streamable HTTP)
 @app.get("/sse", tags=["MCP"])
 async def handle_sse(request: Request):
-    """MCP Server-Sent Events (SSE) endpoint for persistent AI client connection."""
+    """MCP Server-Sent Events (SSE) endpoint for persistent AI client connection (e.g. Claude Code)."""
     # Check auth query param or header if API_KEY configured
     if settings.API_KEY:
         auth_header = request.headers.get("Authorization")
@@ -401,9 +516,27 @@ async def handle_sse(request: Request):
         )
 
 
+@app.post("/sse", tags=["MCP"])
+async def handle_sse_post(request: Request):
+    """MCP Streamable HTTP POST endpoint for clients connecting directly via HTTP POST (e.g. Antigravity IDE)."""
+    return await handle_jsonrpc_endpoint(request)
+
+
+@app.get("/mcp", tags=["MCP"])
+async def handle_mcp_get(request: Request):
+    """Alias for /sse for clients configuring /mcp endpoint."""
+    return await handle_sse(request)
+
+
+@app.post("/mcp", tags=["MCP"])
+async def handle_mcp_post(request: Request):
+    """MCP Streamable HTTP endpoint (/mcp)."""
+    return await handle_jsonrpc_endpoint(request)
+
+
 @app.post("/messages", tags=["MCP"])
 async def handle_messages(request: Request):
-    """MCP POST messages endpoint for client-to-server JSON-RPC requests."""
+    """MCP messages endpoint - handles both SSE post-messages and Streamable HTTP."""
     if settings.API_KEY:
         auth_header = request.headers.get("Authorization")
         auth_token = None
@@ -414,9 +547,12 @@ async def handle_messages(request: Request):
         if auth_token != settings.API_KEY:
             raise HTTPException(status_code=403, detail="Neplatný autorizační token pro MCP.")
 
-    await sse_transport.handle_post_message(
-        request.scope, request.receive, request._send
-    )
+    if request.query_params.get("session_id"):
+        await sse_transport.handle_post_message(
+            request.scope, request.receive, request._send
+        )
+        return
+    return await handle_jsonrpc_endpoint(request)
 
 
 def run():

@@ -86,3 +86,59 @@ async def test_api_live_endpoints(client):
     data_prog = res_prog.json()
     assert "status_message" in data_prog
 
+
+def test_jsonrpc_initialize_and_tools(client):
+    """Verifies that Streamable HTTP POST /sse and /mcp work for Antigravity IDE and modern clients."""
+    # Test initialize
+    init_payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "antigravity-ide", "version": "2.0"}
+        }
+    }
+    res = client.post("/sse", json=init_payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["jsonrpc"] == "2.0"
+    assert data["id"] == 1
+    assert "serverInfo" in data["result"]
+    assert data["result"]["serverInfo"]["name"] == "volby-cr-2026"
+    assert "tools" in data["result"]["capabilities"]
+
+    # Test tools/list on /mcp
+    list_payload = {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/list",
+        "params": {}
+    }
+    res_list = client.post("/mcp", json=list_payload)
+    assert res_list.status_code == 200
+    data_list = res_list.json()
+    assert data_list["id"] == 2
+    tool_names = [t["name"] for t in data_list["result"]["tools"]]
+    assert "get_election_overview" in tool_names
+    assert "get_senate_results" in tool_names
+
+    # Test tools/call on /sse
+    call_payload = {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "search_municipality_or_district",
+            "arguments": {"query": "Praha", "limit": 3}
+        }
+    }
+    res_call = client.post("/sse", json=call_payload)
+    assert res_call.status_code == 200
+    data_call = res_call.json()
+    assert data_call["id"] == 3
+    assert data_call["result"]["isError"] is False
+    assert len(data_call["result"]["content"]) >= 1
+    assert "Praha" in data_call["result"]["content"][0]["text"]
+
