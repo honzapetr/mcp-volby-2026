@@ -38,39 +38,7 @@ MOCK_SENAT_OKRSKY_XML = """<?xml version="1.0" encoding="utf-8"?>
 """
 
 
-@pytest.fixture
-def client():
-    with TestClient(app) as c:
-        yield c
 
-
-@pytest.fixture(autouse=True)
-def mock_csu_calls(monkeypatch):
-    """Mocks network calls to CSU to ensure reliable and fast offline tests."""
-    async def mock_senat_vysledky():
-        return ET.fromstring(MOCK_SENAT_XML)
-
-    async def mock_kv_vysledky_cr():
-        return ET.fromstring(MOCK_KV_CR_XML)
-
-    async def mock_kv_obec(kod):
-        return ET.fromstring(MOCK_MUNICIPAL_XML)
-
-    async def mock_senat_obvod_obce(district_num):
-        return ET.fromstring(MOCK_SENATE_BREAKDOWN_XML)
-
-    async def mock_kv_okrsky(davka=None):
-        return ET.fromstring(MOCK_KV_OKRSKY_XML)
-
-    async def mock_senat_okrsky(davka=None):
-        return ET.fromstring(MOCK_SENAT_OKRSKY_XML)
-
-    monkeypatch.setattr(csu_client, "get_senat_vysledky", mock_senat_vysledky)
-    monkeypatch.setattr(csu_client, "get_kv_vysledky_cr", mock_kv_vysledky_cr)
-    monkeypatch.setattr(csu_client, "get_kv_obec", mock_kv_obec)
-    monkeypatch.setattr(csu_client, "get_senat_obvod_obce", mock_senat_obvod_obce)
-    monkeypatch.setattr(csu_client, "get_kv_okrsky", mock_kv_okrsky)
-    monkeypatch.setattr(csu_client, "get_senat_okrsky", mock_senat_okrsky)
 
 
 

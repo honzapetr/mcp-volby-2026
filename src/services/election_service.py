@@ -26,6 +26,11 @@ from src.parsers.codebook_loader import codebook_index
 from src.parsers.kv_parser import parse_kv_cr_overview, parse_municipal_results
 from src.parsers.precinct_parser import parse_precinct_batch
 from src.parsers.senat_parser import parse_senate_district_breakdown, parse_senate_results
+from src.formatters import (
+    project_municipal_results,
+    project_senate_district_breakdown,
+    project_senate_results,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,8 +99,13 @@ class ElectionService:
             last_updated=senat_res.generated_at or kv_summary.get("generated_at", now_iso),
         )
 
-    async def get_senate_results(self, obvod: Optional[str | int] = None) -> SenateOverviewResponse:
-        """Retrieves Senate results for all 27 contested districts or a specific one."""
+    async def get_senate_results(
+        self,
+        obvod: Optional[str | int] = None,
+        detail_level: str = settings.DEFAULT_SENATE_DETAIL,
+        status_filter: Optional[str] = None,
+    ) -> SenateOverviewResponse:
+        """Retrieves Senate results for all 27 contested districts or a specific one with projection."""
         district_num = None
         if obvod is not None:
             district_num = self._codebooks.resolve_senate_district(obvod)
@@ -116,10 +126,17 @@ class ElectionService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Pro senátní obvod č. {district_num} nejsou v datech ČSÚ k dispozici žádné výsledky.",
             )
-        return res
+        return project_senate_results(res, detail_level=detail_level, status_filter=status_filter)
 
-    async def get_municipal_results(self, obec: str) -> MunicipalResultResponse:
-        """Retrieves municipal election results for a given municipality code or name."""
+    async def get_municipal_results(
+        self,
+        obec: str,
+        detail_level: str = settings.DEFAULT_MUNICIPAL_DETAIL,
+        include_candidates: bool = False,
+        party: Optional[str] = None,
+        top_parties: Optional[int] = None,
+    ) -> MunicipalResultResponse:
+        """Retrieves municipal election results for a given municipality code or name with projection."""
         kod_zastup = self._codebooks.resolve_municipality_code(obec)
         if not kod_zastup:
             search_res = self._codebooks.search(obec, limit=5)
@@ -130,7 +147,14 @@ class ElectionService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail_msg)
 
         xml_root = await self._csu.get_kv_obec(kod_zastup)
-        return parse_municipal_results(xml_root)
+        raw_res = parse_municipal_results(xml_root)
+        return project_municipal_results(
+            raw_res,
+            detail_level=detail_level,
+            include_candidates=include_candidates,
+            party_filter=party,
+            top_parties=top_parties,
+        )
 
     async def search(self, query: str, limit: int = settings.DEFAULT_SEARCH_LIMIT) -> SearchResultResponse:
         """Searches municipalities and Senate districts."""
@@ -157,8 +181,15 @@ class ElectionService:
             status_message=msg,
         )
 
-    async def get_senate_district_breakdown(self, obvod: str | int) -> SenateDistrictBreakdownResponse:
-        """Retrieves votes across all municipalities within a specific Senate district."""
+    async def get_senate_district_breakdown(
+        self,
+        obvod: str | int,
+        limit: Optional[int] = settings.DEFAULT_BREAKDOWN_LIMIT,
+        obec: Optional[str] = None,
+        sort_by: str = "voters",
+        summary_only: bool = False,
+    ) -> SenateDistrictBreakdownResponse:
+        """Retrieves votes across all municipalities within a specific Senate district with projection."""
         district_num = self._codebooks.resolve_senate_district(obvod)
         if district_num is None:
             raise HTTPException(
@@ -170,7 +201,14 @@ class ElectionService:
         name_str = district_name.name if district_name else f"Obvod č. {district_num}"
 
         xml_root = await self._csu.get_senat_obvod_obce(district_num)
-        return parse_senate_district_breakdown(xml_root, district_num, district_name=name_str)
+        raw_res = parse_senate_district_breakdown(xml_root, district_num, district_name=name_str)
+        return project_senate_district_breakdown(
+            raw_res,
+            limit=limit,
+            obec_filter=obec,
+            sort_by=sort_by,
+            summary_only=summary_only,
+        )
 
     async def get_coalition_scenarios(self, municipality: str) -> CoalitionAnalysisResponse:
         """Calculates minimal winning coalitions and majority scenarios for a municipal council."""

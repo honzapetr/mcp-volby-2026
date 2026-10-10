@@ -33,18 +33,27 @@ Pokud jako AI asistent pracujete s tímto repozitářem nebo odpovídáte uživa
 
 ## 2. Přehled MCP nástrojů v repozitáři
 
-Agent má k dispozici 8 nástrojů vystavených přes MCP i REST:
+V prostředí je MCP server zaregistrován jako **`volby-2026`**. Nástroje jsou dostupné jako **Lazy MCP tools** a volají se přes systémový nástroj `call_mcp_tool(ServerName="volby-2026", ToolName="...", Arguments={...})`.
 
-| Nástroj | Kdy použít |
-|---|---|
-| `get_election_overview` | Celostátní souhrn voleb, účast a tempo sčítání v ČR pro Senát (vč. 2. kola) i obce. |
-| `get_senate_results` | Výsledky za všech 27 obvodů nebo konkrétní obvod (číslo 3..81 nebo název). Obsahuje strany, obě kola i marže. |
-| `get_senate_district_breakdown` | Geografický rozpad senátního obvodu po jednotlivých obcích v obvodu (lokální lídři, strany, polarizace město vs. venkov). |
-| `get_municipal_results` | Výsledky konkrétního města/obce (všech 6 396 obcí ČR): mandáty, většina `majority_seats`, propadlé hlasy `wasted_votes_pct`, kompletní kandidátní listiny včetně stranické příslušnosti (`political_affiliation`), navrhující strany, věku, povolání, přednostních hlasů (křížků) a zvolení zastupitelé (`elected_representatives`). |
-| `get_coalition_scenarios` | Koaliční matematika pro zastupitelstvo: jednobarevné většiny a minimální vítězné koalice (MWC). |
-| `search_municipality_or_district` | Vyhledání kódu obce nebo čísla senátního obvodu dle textového dotazu (odolné vůči diakritice). |
-| `get_live_counting_progress` | Rychlost a dynamika sčítání v čase (okrsky za minutu, průběžný analytický komentář). |
-| `get_precinct_counting_speed` | Časy zpracování a odevzdání spočtených hlasů z volebních okrsků (`DATUM_CAS_ZPRAC`). Umožňuje najít nejpomalejší i nejrychlejší volební komise v ČR, v obci nebo v senátním obvodu. |
+### ⚠️ ZÁVAZNÁ PRAVIDLA PRO VOLÁNÍ NÁSTROJŮ:
+1. **ZÁKAZ spouštění lokálního kódu pro volební data:**
+   - Pro zodpovídání dotazů na volební výsledky **NIKDY nespouštěj** lokální Python kód (`src/server.py`, `src/services/...`), skripty ani CLI přes `run_command`!
+   - Produkční server běží vzdáleně na Azure s živým napojením na ČSÚ. Všechna data získávej **výhradně přes MCP server `volby-2026`**.
+2. **Přímé volání bez čtení JSON schémat:**
+   - Asistent **nemusí** číst soubory `.json` na disku (`search_municipality_or_district.json` atd.), protože veškeré parametry má plně specifikované v tabulce níže a ve skillu `czech-elections-analyst`. Volej `call_mcp_tool` přímo!
+
+### Specifikace nástrojů (ServerName = "volby-2026"):
+
+| Nástroj (`ToolName`) | Argumenty (`Arguments`) | Kdy použít & Popis |
+|---|---|---|
+| `get_election_overview` | `{"format": "json"}` *(volitelné: format='markdown')* | Celostátní souhrn voleb, účast a tempo sčítání v ČR pro Senát (vč. 2. kola) i obce. |
+| `get_senate_results` | `{"obvod": 3, "detail_level": "auto", "status_filter": "all", "format": "json"}` *(vše volitelné)* | Výsledky za všech 27 obvodů (bez argumentu vrátí souhrn lídrů bez zahlcení kontextu) nebo konkrétní obvod (číslo 3..81 nebo název). Podporuje filtry `status_filter` ('close_races' pro těsné souboje) i výstup ve formátu `markdown`. |
+| `get_senate_district_breakdown` | `{"obvod": 3, "limit": 10, "sort_by": "voters", "summary_only": false}` *(obvod povinné, ostatní volitelné)* | Geografický rozpad senátního obvodu po jednotlivých obcích v obvodu (lokální lídři, strany, polarizace město vs. venkov). Standardně vrací 10 nejvýznamnějších obcí a statistický souhrn pro úsporu tokenů. |
+| `get_municipal_results` | `{"obec": "Praha", "detail_level": "parties", "party": "Piráti", "top_parties": 5, "format": "json"}` *(obec povinné, ostatní volitelné)* | Výsledky konkrétního města/obce (všech 6 396 obcí ČR): mandáty, většina `majority_seats`, propadlé hlasy `wasted_votes_pct`. Výchozí `detail_level="parties"` vrací výsledky stran a zvolené zastupitele (šetří 90 % tokenů vypuštěním stovek nezvolených kandidátů). Pro listinu konkrétní strany použij `party="..."`. |
+| `get_coalition_scenarios` | `{"obec": "Praha", "format": "json"}` *(obec povinné, format volitelné)* | Koaliční matematika pro zastupitelstvo: jednobarevné většiny a minimální vítězné koalice (MWC). |
+| `search_municipality_or_district` | `{"query": "Cheb", "limit": 15, "format": "json"}` *(query povinné, ostatní volitelné)* | Vyhledání kódu obce nebo čísla senátního obvodu dle textového dotazu (odolné vůči diakritice). |
+| `get_live_counting_progress` | `{"format": "json"}` *(volitelné)* | Rychlost a dynamika sčítání v čase (okrsky za minutu, průběžný analytický komentář). |
+| `get_precinct_counting_speed` | `{"election_type": "obce", "order": "slowest", "limit": 10, "format": "json"}` *(vše volitelné: obec, obvod, okrsek, format)* | Časy zpracování a odevzdání spočtených hlasů z volebních okrsků (`DATUM_CAS_ZPRAC`). Umožňuje najít nejpomalejší i nejrychlejší volební komise v ČR, v obci nebo v senátním obvodu. |
 
 ---
 

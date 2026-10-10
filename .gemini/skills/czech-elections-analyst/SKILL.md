@@ -107,43 +107,81 @@ Pokud strana získá jednobarevnou většinu (`single_party_majority`), je jedno
 
 ---
 
-## 4. MCP Nástroje a jejich využití
+## 4. MCP Nástroje a jejich volání
 
-Server **volby-cr-2026** exponuje následující sadu specializovaných nástrojů:
+V prostředí Antigravity je MCP server zaregistrován pod názvem **`volby-2026`** jako **Lazy MCP server**. Nástroje se volají výhradně přes systémový nástroj `call_mcp_tool`.
 
-| Název nástroje | Vstupní parametry | Popis a výstup |
-|---|---|---|
-| `get_election_overview` | *(žádné)* | Celostátní souhrn voleb: stav sčítání, účast, zpracované okrsky pro Senát i Obce. |
-| `get_senate_results` | `obvod` *(volitelné: číslo nebo název)* | Výsledky Senátu za všech 27 volených obvodů nebo konkrétní obvod (včetně 2. kola, stran, lead/cutoff margin). |
-| `get_senate_district_breakdown` | `obvod` *(povinné: číslo nebo název)* | Hlasy pro kandidáty po jednotlivých obcích senátního obvodu (včetně stranické příslušnosti a lídrů obcí). |
-| `get_municipal_results` | `obec` *(povinné: název nebo kód)* | Výsledky komunálních voleb v obci: mandáty, hlasy, `majority_seats`, `wasted_votes_pct`, `winner`/`leading_party`, kompletní kandidátní listiny se stranickou příslušností (`political_affiliation`), navrhující stranou, věkem, povoláním, jmenný seznam kandidátů (hlasy/křížky) a zvolení zastupitelé (`elected_representatives`). |
-| `get_coalition_scenarios` | `obec` *(povinné: název nebo kód)* | Povolební koaliční matematika: jednobarevné většiny a minimální vítězné koalice (MWC). |
-| `search_municipality_or_district` | `query` *(povinné: str)*, `limit` *(int)* | Vyhledávač obcí a senátních obvodů s tolerancí diakritiky a číselných kódů. |
-| `get_live_counting_progress` | *(žádné)* | Živá telemetrie rychlosti sčítání a průběžný stavový komentář. |
-| `get_precinct_counting_speed` | `election_type`, `order`, `obec`, `obvod`, `okrsek`, `limit` | Zjištění časů odevzdání a schválení zápisů okrskových volebních komisí (`DATUM_CAS_ZPRAC`). Pořadí nejpomalejších i nejrychlejších komisí v ČR, obci či obvodu. |
+### ⚠️ ZÁVAZNÁ PRAVIDLA PRO AI ASISTENTY:
+1. **PŘÍSNÝ ZÁKAZ spouštění lokálního kódu (`run_command` / python `src/`):**
+   - **NIKDY** se nepokoušej spouštět lokální Python kód, importovat moduly ze složky `src/`, spouštět `src/server.py` ani psát ad-hoc skripty pro získávání volebních dat!
+   - Produkční MCP server již plně běží na cloudu s živým napojením na ČSÚ. Všechna data získávej **výhradně přes MCP volání `call_mcp_tool`**.
+2. **NENÍ NUTNÉ číst `.json` soubory na disku:**
+   - Asistent **nemusí** ztrácet čas a kontext čtením schémat jako `search_municipality_or_district.json` na disku. Veškeré parametry a jejich typy jsou kompletně popsány v následující tabulce. Volej `call_mcp_tool` rovnou.
+3. **Formát volání:**
+   - Každé volání musí mít parametr `ServerName: "volby-2026"`, přesný `ToolName` a slovník parametrů `Arguments: {...}`.
+
+### Specifikace všech 8 MCP nástrojů
+
+| Nástroj (`ToolName`) | JSON Argumenty (`Arguments`) | Povinné parametry | Popis a výstup |
+|---|---|---|---|
+| `get_election_overview` | `{"format": "json"}` | *(žádné)* | Celostátní souhrn voleb: zda začalo sčítání, celková účast a procento sečtených okrsků pro Senát i Obce. Volitelně `format="markdown"`. |
+| `get_senate_results` | `{"obvod": 3, "detail_level": "auto", "status_filter": "all", "format": "json"}` | *(volitelné)* | Výsledky Senátu za všech 27 volených obvodů (bez argumentu vrátí souhrn lídrů bez zahlcení kontextu) nebo pro konkrétní obvod (číslo 3..81 nebo název sídla). Vrací 1. i 2. kolo, strany, `lead_margin` a `cutoff_margin`. |
+| `get_senate_district_breakdown` | `{"obvod": 3, "limit": 10, "sort_by": "voters", "summary_only": false}` | `obvod` | Geografický rozpad výsledků senátního obvodu po jednotlivých obcích uvnitř obvodu (lokální lídři, strany, polarizace město vs. venkov). Standardně vrací 10 nejvýznamnějších obcí s agregovaným statistickým souhrnem pro úsporu tokenů. |
+| `get_municipal_results` | `{"obec": "Praha", "detail_level": "parties", "party": "Piráti", "top_parties": 5, "format": "json"}` | `obec` | Výsledky komunálních voleb v obci: mandáty, hlasy, `majority_seats`, `wasted_votes_pct`. Výchozí `detail_level="parties"` vrací výsledky stran a zvolené zastupitele (šetří 90 % tokenů vypuštěním stovek nezvolených kandidátů). Pro listinu konkrétní strany použij `party="..."`. |
+| `get_coalition_scenarios` | `{"obec": "Praha", "format": "json"}` | `obec` | Povolební koaliční matematika: jednobarevné většiny a minimální vítězné koalice (MWC). |
+| `search_municipality_or_district` | `{"query": "Cheb", "limit": 15, "format": "json"}` | `query` | Vyhledávač obcí a senátních obvodů s tolerancí diakritiky a číselných kódů. Vrací kód obce (např. `"560715"`) nebo číslo obvodu (např. `"3"`). |
+| `get_live_counting_progress` | `{"format": "json"}` | *(žádné)* | Živá telemetrie rychlosti sčítání (okrsky za minutu) a průběžný analytický stavový komentář. |
+| `get_precinct_counting_speed` | `{"election_type": "obce", "order": "slowest", "limit": 10, "format": "json"}` *(volitelně i: `obec`, `obvod`, `okrsek`)* | *(žádné)* | Časy odevzdání a schválení zápisů okrskových volebních komisí (`DATUM_CAS_ZPRAC`). Pořadí nejpomalejších (`"slowest"`) i nejrychlejších (`"fastest"`) komisí v ČR, obci či obvodu. |
 
 ---
-
 
 ## 5. Ukázkové analytické pracovní postupy (Workflows)
 
 ### Scénář 1: Hodnocení situace v senátním obvodu
-1. Zavolej `get_senate_results(obvod="Cheb")` (nebo číslo `3`).
+1. Zavolej MCP nástroj pro senátní výsledky:
+   ```json
+   call_mcp_tool(
+     ServerName="volby-2026",
+     ToolName="get_senate_results",
+     Arguments={"obvod": "Cheb"}
+   )
+   ```
 2. Vyhodnoť stav:
    - Pokud `is_completed == True` a `candidates[0].elected_round_1 == True`: kandidát zvolen v 1. kole.
    - Pokud `is_completed == True` a nikdo nemá >50 %: identifikuj 1. a 2. kandidáta postupující do 2. kola. Zkontroluj `cutoff_margin` (jak těsně postoupil druhý před třetím).
    - Pokud probíhá 2. kolo: sleduj `votes_round_2`, `votes_pct_round_2` a `lead_margin`. V případě rovnosti hlasů rozhoduje dle zákona los.
-3. Zavolej `get_senate_district_breakdown(obvod=3)` pro analýzu geografické podpory:
+3. Zavolej rozpad po obcích pro analýzu geografické podpory:
+   ```json
+   call_mcp_tool(
+     ServerName="volby-2026",
+     ToolName="get_senate_district_breakdown",
+     Arguments={"obvod": 3}
+   )
+   ```
    - Který kandidát ovládl centrální město (Cheb)?
    - Kdo dominoval na venkově a menších obcích (Aš, Františkovy Lázně)?
 
 ### Scénář 2: Analýza povolebního vyjednávání na radnici
-1. Zavolej `get_municipal_results(obec="Praha")`.
+1. Zavolej výsledky pro konkrétní obec:
+   ```json
+   call_mcp_tool(
+     ServerName="volby-2026",
+     ToolName="get_municipal_results",
+     Arguments={"obec": "Praha"}
+   )
+   ```
 2. Zkontroluj základní parametry:
    - Celkem mandátů (`total_seats` = 65), potřebná většina (`majority_seats` = 33).
    - Propadlé hlasy (`wasted_votes_pct`).
    - Stav sčítání (`is_completed`, `winner` po sečtení nebo `leading_party` během sčítání).
-3. Zavolej `get_coalition_scenarios(obec="Praha")`.
+3. Zavolej kalkulaci koaličních scénářů:
+   ```json
+   call_mcp_tool(
+     ServerName="volby-2026",
+     ToolName="get_coalition_scenarios",
+     Arguments={"obec": "Praha"}
+   )
+   ```
 4. Analyzuj vygenerované koaliční varianty:
    - Existuje jednobarevná většina (`single_party_majority`)?
    - Existuje 2-koalice s pohodlnou většinou?
@@ -153,13 +191,24 @@ Server **volby-cr-2026** exponuje následující sadu specializovaných nástroj
 
 ## 6. Integrace a konfigurace MCP klienta
 
-Server lze snadno nakonfigurovat v libovolném MCP klientovi (Claude Desktop, Cursor, Gemini CLI, Antigravity):
+Server lze nakonfigurovat v libovolném MCP klientovi (Claude Desktop, Cursor, Gemini CLI, Antigravity):
 
-### Claude Desktop (`claude_desktop_config.json`)
+### Antigravity & Claude Desktop konfigurace
 ```json
 {
   "mcpServers": {
-    "volby-cr-2026": {
+    "volby-2026": {
+      "serverUrl": "https://volby2026-honzapetr.polandcentral.cloudapp.azure.com/sse"
+    }
+  }
+}
+```
+
+Nebo lokální spuštění přes Stdio:
+```json
+{
+  "mcpServers": {
+    "volby-2026": {
       "command": "python",
       "args": ["-m", "src.server"],
       "cwd": "C:/Users/jan.petr/OneDrive - dolphinconsulting.cz/Projects/MCP_volby_2026"
@@ -170,6 +219,6 @@ Server lze snadno nakonfigurovat v libovolném MCP klientovi (Claude Desktop, Cu
 
 ### Síťové připojení přes Streamable HTTP / SSE endpoint
 Pokud server běží samostatně (např. přes `uvicorn src.server:app --port 8088`):
-- **SSE URL:** `http://localhost:8088/sse`
+- **SSE URL:** `http://localhost:8088/sse` (nebo produkční `https://volby2026-honzapetr.polandcentral.cloudapp.azure.com/sse`)
 - **Streamable HTTP POST:** `http://localhost:8088/mcp`
 - **REST OpenAPI docs:** `http://localhost:8088/docs`

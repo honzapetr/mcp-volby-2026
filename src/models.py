@@ -41,7 +41,7 @@ class SenateDistrictResult(BaseModel):
     district_name: str = Field(description="Sídlo senátního obvodu")
     turnout: TurnoutInfo = Field(description="Volební účast v obvodu (1. kolo)")
     turnout_round_2: Optional[TurnoutInfo] = Field(default=None, description="Volební účast v obvodu (2. kolo)")
-    candidates: List[SenateCandidateResult] = Field(description="Seznam kandidátů s výsledky")
+    candidates: List[SenateCandidateResult] = Field(default_factory=list, description="Seznam kandidátů s výsledky")
     is_completed: bool = Field(description="Zda jsou již sečteny všechny okrsky v obvodu")
     status_summary: str = Field(description="Stručné textové shrnutí stavu obvodu")
     lead_margin: Optional[dict] = Field(default=None, description="Rozdíl mezi 1. a 2. kandidátem {'votes': int, 'pct': float}")
@@ -118,7 +118,7 @@ class MunicipalitySenateResult(BaseModel):
     municipality_code: str = Field(description="Kód obce ČSÚ")
     municipality_name: str = Field(description="Název obce")
     turnout: TurnoutInfo = Field(description="Volební účast v obci")
-    candidates: List[SenateCandidateResult] = Field(description="Výsledky kandidátů v obci")
+    candidates: List[SenateCandidateResult] = Field(default_factory=list, description="Výsledky kandidátů v obci")
     leader_name: Optional[str] = Field(default=None, description="Vítězný / vedoucí kandidát v této obci")
 
 
@@ -129,7 +129,8 @@ class SenateDistrictBreakdownResponse(BaseModel):
     generated_at: str = Field(description="Čas vygenerování dat ČSÚ")
     municipalities_total: int = Field(description="Celkový počet obcí v obvodu")
     municipalities_processed: int = Field(description="Počet sečtených obcí v obvodu")
-    municipalities: List[MunicipalitySenateResult] = Field(description="Výsledky za jednotlivé obce v obvodu")
+    municipalities: List[MunicipalitySenateResult] = Field(default_factory=list, description="Výsledky za jednotlivé obce v obvodu")
+    summary: Optional[dict] = Field(default=None, description="Agregovaný statistický souhrn obvodu (např. extrémy účasti)")
 
 
 class CoalitionScenario(BaseModel):

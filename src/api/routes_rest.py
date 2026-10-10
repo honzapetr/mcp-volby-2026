@@ -50,9 +50,15 @@ async def api_overview():
     tags=["Senát 2026"],
     dependencies=[Depends(verify_auth)],
 )
-async def api_senat_all():
+async def api_senat_all(
+    detail_level: str = Query(settings.DEFAULT_SENATE_DETAIL, description="Úroveň detailu ('auto', 'summary', 'full')"),
+    status_filter: Optional[str] = Query(None, description="Filtr stavu ('all', 'completed', 'in_progress', 'close_races')"),
+):
     """Výsledky voleb do Senátu za všech 27 volených obvodů."""
-    return await election_service.get_senate_results()
+    return await election_service.get_senate_results(
+        detail_level=detail_level,
+        status_filter=status_filter,
+    )
 
 
 @router.get(
@@ -61,9 +67,12 @@ async def api_senat_all():
     tags=["Senát 2026"],
     dependencies=[Depends(verify_auth)],
 )
-async def api_senat_district(obvod: str):
+async def api_senat_district(
+    obvod: str,
+    detail_level: str = Query("full", description="Úroveň detailu ('auto', 'summary', 'full')"),
+):
     """Výsledky voleb do Senátu za konkrétní senátní obvod (číslo obvodu nebo sídlo)."""
-    return await election_service.get_senate_results(obvod)
+    return await election_service.get_senate_results(obvod, detail_level=detail_level)
 
 
 @router.get(
@@ -72,9 +81,21 @@ async def api_senat_district(obvod: str):
     tags=["Senát 2026"],
     dependencies=[Depends(verify_auth)],
 )
-async def api_senat_district_breakdown(obvod: str):
+async def api_senat_district_breakdown(
+    obvod: str,
+    limit: int = Query(settings.DEFAULT_BREAKDOWN_LIMIT, description="Maximální počet obcí (0 pro všechny)"),
+    obec: Optional[str] = Query(None, description="Filtr na konkrétní obec uvnitř obvodu"),
+    sort_by: str = Query("voters", description="Řazení: 'voters', 'turnout', 'processed', 'name'"),
+    summary_only: bool = Query(False, description="Pouze agregovaný souhrn"),
+):
     """Detailní výsledky senátních voleb po obcích v rámci obvodu."""
-    return await election_service.get_senate_district_breakdown(obvod)
+    return await election_service.get_senate_district_breakdown(
+        obvod=obvod,
+        limit=limit,
+        obec=obec,
+        sort_by=sort_by,
+        summary_only=summary_only,
+    )
 
 
 @router.get(
@@ -83,9 +104,21 @@ async def api_senat_district_breakdown(obvod: str):
     tags=["Komunální volby 2026"],
     dependencies=[Depends(verify_auth)],
 )
-async def api_municipal(obec: str):
+async def api_municipal(
+    obec: str,
+    detail_level: str = Query(settings.DEFAULT_MUNICIPAL_DETAIL, description="Úroveň detailu ('parties', 'summary', 'elected', 'full')"),
+    include_candidates: bool = Query(False, description="Zahrnout kompletní kandidátní listiny"),
+    party: Optional[str] = Query(None, description="Filtr na kandidáty konkrétní strany"),
+    top_parties: Optional[int] = Query(None, description="Omezení na N nejsilnějších stran"),
+):
     """Výsledky voleb do zastupitelstva konkrétní obce/města dle názvu nebo kódu."""
-    return await election_service.get_municipal_results(obec)
+    return await election_service.get_municipal_results(
+        obec=obec,
+        detail_level=detail_level,
+        include_candidates=include_candidates,
+        party=party,
+        top_parties=top_parties,
+    )
 
 
 @router.get(

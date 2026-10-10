@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     MCP_SERVER_NAME: str = "volby-cr-2026"
     DEFAULT_SEARCH_LIMIT: int = 15
+    DEFAULT_BREAKDOWN_LIMIT: int = 10
+    DEFAULT_MUNICIPAL_DETAIL: str = "parties"
+    DEFAULT_SENATE_DETAIL: str = "auto"
+    DEFAULT_RESPONSE_FORMAT: str = "json"
 
     # Official CSU (Czech Statistical Office) election endpoints
     CSU_BASE_URL: str = "https://volby.cz"
