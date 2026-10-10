@@ -2,9 +2,10 @@
 
 import logging
 import xml.etree.ElementTree as ET
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from src.models import (
+    MunicipalCandidateResult,
     MunicipalPartyResult,
     MunicipalResultResponse,
     TurnoutInfo,
@@ -20,8 +21,88 @@ def _strip_ns(tag: str) -> str:
     return tag
 
 
-def parse_municipal_results(root: ET.Element) -> MunicipalResultResponse:
+def _parse_candidate_elem(
+    elem: ET.Element,
+    party_name: Optional[str],
+    party_id: Optional[int],
+    kod_zastup: str,
+    tag: str,
+    candidate_registry: Optional[Dict[Tuple[str, int, int], Dict[str, str]]] = None,
+) -> MunicipalCandidateResult:
+    """Parses an individual municipal candidate or elected representative XML element."""
+    cand_num_raw = (
+        elem.attrib.get("PORADOVE_CISLO")
+        or elem.attrib.get("POR_CISLO")
+        or elem.attrib.get("CKAND", "0")
+    )
+    cand_num = int(cand_num_raw) if str(cand_num_raw).isdigit() else 0
+
+    first_name = elem.attrib.get("JMENO", "")
+    last_name = elem.attrib.get("PRIJMENI", "")
+    title_pre = elem.attrib.get("TITULPRED", "")
+    title_post = elem.attrib.get("TITULZA", "")
+
+    # If name details are missing in XML, attempt lookup in candidate registry
+    if (not first_name or not last_name) and candidate_registry:
+        reg_info = candidate_registry.get((str(kod_zastup).zfill(6), party_id or 0, cand_num))
+        if reg_info:
+            first_name = first_name or reg_info.get("first_name", "")
+            last_name = last_name or reg_info.get("last_name", "")
+            title_pre = title_pre or reg_info.get("title_pre", "")
+            title_post = title_post or reg_info.get("title_post", "")
+            if not party_name and reg_info.get("party_name"):
+                party_name = reg_info.get("party_name")
+
+    votes = int(elem.attrib.get("HLASY", 0))
+    votes_pct = float(elem.attrib.get("HLASY_PROC", 0.0))
+
+    is_elected = (
+        tag in ("ZASTUPITEL", "VOLENY_ZASTUPITEL")
+        or elem.attrib.get("MANDAT", "").upper() == "A"
+        or elem.attrib.get("ZVOLEN", "") == "1"
+    )
+
+    order_raw = elem.attrib.get("PORADI_ZVOLENI") or elem.attrib.get("PORADI")
+    order_elected = int(order_raw) if order_raw is not None and str(order_raw).isdigit() else None
+
+    mandat_attr = elem.attrib.get("MANDAT", "").upper()
+    zvolen_attr = elem.attrib.get("ZVOLEN", "")
+    if is_elected:
+        mandate_status = "Zvolen"
+    elif mandat_attr == "N" or zvolen_attr == "0":
+        mandate_status = "Náhradník"
+    else:
+        mandate_status = "Bez mandátu"
+
+    return MunicipalCandidateResult(
+        candidate_number=cand_num,
+        first_name=first_name,
+        last_name=last_name,
+        title_pre=title_pre,
+        title_post=title_post,
+        party_name=party_name,
+        party_id=party_id,
+        votes=votes,
+        votes_pct=votes_pct,
+        is_elected=is_elected,
+        order_elected=order_elected,
+        mandate_status=mandate_status,
+    )
+
+
+def parse_municipal_results(
+    root: ET.Element,
+    candidate_registry: Optional[Dict[Tuple[str, int, int], Dict[str, str]]] = None,
+) -> MunicipalResultResponse:
     """Parses vysledky_obec_XXXXXX.xml for a specific town or city council."""
+    # Lazy import candidate registry from codebooks if not passed explicitly
+    if candidate_registry is None:
+        try:
+            from src.parsers.codebook_loader import codebook_index
+            candidate_registry = codebook_index.municipal_candidates
+        except Exception:
+            candidate_registry = {}
+
     generated_at = root.attrib.get("DATUM_CAS_GENEROVANI", "")
 
     # Find the OBEC element
@@ -52,6 +133,8 @@ def parse_municipal_results(root: ET.Element) -> MunicipalResultResponse:
     )
 
     parties: List[MunicipalPartyResult] = []
+    all_elected: List[MunicipalCandidateResult] = []
+    unattached_candidates: List[MunicipalCandidateResult] = []
 
     for child in obec_elem.iter():
         tag = _strip_ns(child.tag)
@@ -66,20 +149,70 @@ def parse_municipal_results(root: ET.Element) -> MunicipalResultResponse:
                 valid_votes=int(child.attrib.get("PLATNE_HLASY", 0)),
             )
         elif tag == "VOLEBNI_STRANA":
+            list_number = int(child.attrib.get("POR_STR_HLAS_LIST", 0))
+            party_id = int(child.attrib.get("VSTRANA", 0))
+            party_name = child.attrib.get("NAZEV_STRANY", "")
+            votes = int(child.attrib.get("HLASY", 0))
+            votes_pct = float(child.attrib.get("HLASY_PROC", 0.0))
+            seats_won = int(child.attrib.get("ZASTUPITELE_POCET", 0))
+            seats_pct = float(child.attrib.get("ZASTUPITELE_PROC", 0.0))
+            candidates_count = int(child.attrib.get("KANDIDATU_POCET", 0))
+
+            party_candidates: List[MunicipalCandidateResult] = []
+            party_elected: List[MunicipalCandidateResult] = []
+
+            # Parse candidate/representative elements nested under this VOLEBNI_STRANA
+            for sub in child:
+                sub_tag = _strip_ns(sub.tag)
+                if sub_tag in ("ZASTUPITEL", "KANDIDAT", "VOLENY_ZASTUPITEL"):
+                    cand = _parse_candidate_elem(
+                        sub,
+                        party_name=party_name,
+                        party_id=party_id,
+                        kod_zastup=kod_zastup,
+                        tag=sub_tag,
+                        candidate_registry=candidate_registry,
+                    )
+                    party_candidates.append(cand)
+                    if cand.is_elected:
+                        party_elected.append(cand)
+                        all_elected.append(cand)
+
+            # Sort party candidates: elected first, then by votes descending
+            party_candidates.sort(
+                key=lambda c: (
+                    0 if c.is_elected else 1,
+                    c.order_elected if c.order_elected is not None else 9999,
+                    -c.votes,
+                    c.candidate_number,
+                )
+            )
+
             party = MunicipalPartyResult(
-                list_number=int(child.attrib.get("POR_STR_HLAS_LIST", 0)),
-                party_id=int(child.attrib.get("VSTRANA", 0)),
-                party_name=child.attrib.get("NAZEV_STRANY", ""),
-                votes=int(child.attrib.get("HLASY", 0)),
-                votes_pct=float(child.attrib.get("HLASY_PROC", 0.0)),
-                seats_won=int(child.attrib.get("ZASTUPITELE_POCET", 0)),
-                seats_pct=float(child.attrib.get("ZASTUPITELE_PROC", 0.0)),
-                candidates_count=int(child.attrib.get("KANDIDATU_POCET", 0)),
+                list_number=list_number,
+                party_id=party_id,
+                party_name=party_name,
+                votes=votes,
+                votes_pct=votes_pct,
+                seats_won=seats_won,
+                seats_pct=seats_pct,
+                candidates_count=candidates_count,
+                candidates=party_candidates,
+                elected_candidates=party_elected,
             )
             parties.append(party)
 
     # Sort parties: by votes descending, then seats won, then list number
     parties.sort(key=lambda p: (p.votes, p.seats_won, -p.list_number), reverse=True)
+
+    # Sort all elected council members: by order of election, then votes descending
+    all_elected.sort(
+        key=lambda c: (
+            c.order_elected if c.order_elected is not None else 9999,
+            -c.votes,
+            c.party_name or "",
+        )
+    )
 
     # Check completeness
     is_completed = je_spocteno or (
@@ -135,6 +268,7 @@ def parse_municipal_results(root: ET.Element) -> MunicipalResultResponse:
         majority_seats=majority_seats,
         wasted_votes_pct=wasted_votes_pct,
         counting_status=counting_status,
+        elected_representatives=all_elected,
     )
 
 

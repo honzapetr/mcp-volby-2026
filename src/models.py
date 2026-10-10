@@ -61,6 +61,22 @@ class SenateOverviewResponse(BaseModel):
     districts: List[SenateDistrictResult] = Field(description="Výsledky za jednotlivé obvody")
 
 
+class MunicipalCandidateResult(BaseModel):
+    """Result for an individual candidate in a municipal election."""
+    candidate_number: int = Field(description="Pořadové číslo kandidáta na kandidátní listině")
+    first_name: str = Field(description="Jméno kandidáta")
+    last_name: str = Field(description="Příjmení kandidáta")
+    title_pre: str = Field(default="", description="Titul před jménem")
+    title_post: str = Field(default="", description="Titul za jménem")
+    party_name: Optional[str] = Field(default=None, description="Volební strana")
+    party_id: Optional[int] = Field(default=None, description="Číslo / kód volební strany ČSÚ")
+    votes: int = Field(default=0, description="Počet získaných přednostních hlasů (křížků)")
+    votes_pct: float = Field(default=0.0, description="Procentuální podíl hlasů v rámci strany")
+    is_elected: bool = Field(default=False, description="Zda získal mandát zastupitele")
+    order_elected: Optional[int] = Field(default=None, description="Pořadí zvolení / mandátu")
+    mandate_status: Optional[str] = Field(default=None, description="Status mandátu: 'Zvolen', 'Náhradník', 'Bez mandátu'")
+
+
 class MunicipalPartyResult(BaseModel):
     """Result for a candidate list / political party in a municipality."""
     list_number: int = Field(description="Číslo volební strany na hlasovacím lístku")
@@ -71,6 +87,8 @@ class MunicipalPartyResult(BaseModel):
     seats_won: int = Field(description="Počet získaných mandátů v zastupitelstvu")
     seats_pct: float = Field(description="Procentuální podíl mandátů")
     candidates_count: int = Field(description="Počet kandidátů na listině")
+    candidates: List[MunicipalCandidateResult] = Field(default_factory=list, description="Seznam kandidátů s výsledky a hlasy")
+    elected_candidates: List[MunicipalCandidateResult] = Field(default_factory=list, description="Seznam přímo zvolených zastupitelů strany")
 
 
 class MunicipalResultResponse(BaseModel):
@@ -88,6 +106,7 @@ class MunicipalResultResponse(BaseModel):
     majority_seats: int = Field(default=0, description="Minimální počet mandátů pro většinu (total_seats // 2 + 1)")
     wasted_votes_pct: float = Field(default=0.0, description="Součet % hlasů propadlých stranám s 0 mandáty")
     counting_status: Optional[str] = Field(default=None, description="Indikace stavu sčítání")
+    elected_representatives: List[MunicipalCandidateResult] = Field(default_factory=list, description="Všichni zvolení zastupitelé obce napříč stranami")
 
 
 class MunicipalitySenateResult(BaseModel):

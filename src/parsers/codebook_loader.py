@@ -130,6 +130,7 @@ class CodebookIndex:
         self.municipalities: Dict[str, SearchResultItem] = {}  # code -> item
         self.senate_districts: Dict[int, SearchResultItem] = {}  # district_num -> item
         self.senate_candidates: Dict[Tuple[int, int], Dict[str, str]] = {}  # (district, cand_num) -> info
+        self.municipal_candidates: Dict[Tuple[str, int, int], Dict[str, str]] = {}  # (kod_zastup, party_id, cand_num) -> info
         self._initialized = False
 
     def initialize_defaults(self):
@@ -229,6 +230,72 @@ class CodebookIndex:
             "political_affiliation": "",
         })
 
+    def get_municipal_candidate_info(self, kod_zastup: str, party_id: int, candidate_num: int) -> Dict[str, str]:
+        """Returns candidate details from municipal candidate registry (kvrk.json)."""
+        kod_clean = str(kod_zastup).strip().zfill(6)
+        return self.municipal_candidates.get((kod_clean, party_id, candidate_num), {
+            "first_name": "",
+            "last_name": "",
+            "title_pre": "",
+            "title_post": "",
+            "party_name": "",
+            "nominating_party": "",
+            "political_affiliation": "",
+        })
+
+    async def load_municipal_candidates(self):
+        """Optionally loads candidate registry for municipal elections from CSU open data (kvrk.json)."""
+        candidate_urls = [
+            f"{settings.CSU_BASE_URL}/opendata/{settings.KV_VERSION}/KV2026reg20261007_json.zip",
+            f"https://volby.cz/opendata/{settings.KV_VERSION}/KV2026reg20261007_json.zip",
+        ]
+        data = None
+        for url in candidate_urls:
+            try:
+                data = await csu_client.get_zip_json(url, "kvrk.json", ttl=86400)
+                if data:
+                    break
+            except Exception:
+                continue
+
+        if not data:
+            return
+
+        items = (data.get("polozky") or data.get("položky") or []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+        count = 0
+        for item in items:
+            raw_kod = item.get("KODZASTUP", item.get("kod_zastup", 0))
+            raw_party = item.get("VSTRANA", item.get("POR_STR_HLAS_LIST", item.get("vstrana", 0)))
+            raw_ckand = item.get("POR_CISLO", item.get("CKAND", item.get("poradove_cislo", 0)))
+            try:
+                kod = str(raw_kod).strip().zfill(6)
+                party_id = int(raw_party)
+                ckand = int(raw_ckand)
+            except (ValueError, TypeError):
+                continue
+
+            first_name = item.get("JMENO", item.get("jmeno", ""))
+            last_name = item.get("PRIJMENI", item.get("prijmeni", ""))
+            title_pre = item.get("TITULPRED", item.get("titulpred", ""))
+            title_post = item.get("TITULZA", item.get("titulza", ""))
+            party_name = item.get("NAZEV_VSTR", item.get("NAZEV_STRANY", ""))
+            nom_party = item.get("NAZEV_NSTR", item.get("NAVRH_STRANA", ""))
+            pol_aff = item.get("NAZEV_PSTR", item.get("POL_PRISL", ""))
+
+            if kod and ckand:
+                self.municipal_candidates[(kod, party_id, ckand)] = {
+                    "first_name": str(first_name or ""),
+                    "last_name": str(last_name or ""),
+                    "title_pre": str(title_pre or ""),
+                    "title_post": str(title_post or ""),
+                    "party_name": str(party_name or ""),
+                    "nominating_party": str(nom_party or ""),
+                    "political_affiliation": str(pol_aff or ""),
+                }
+                count += 1
+
+        logger.info("Loaded %d municipal candidates from CSU open data (kvrk.json).", count)
+
     async def load_remote_codebooks(self):
         """Optionally loads complete nationwide municipality list from CSU open data."""
         try:
@@ -287,6 +354,12 @@ class CodebookIndex:
             await self.load_senate_candidates()
         except Exception as exc:
             logger.warning("Could not load Senate candidates (%s).", exc)
+
+        # Also load municipal candidate registry
+        try:
+            await self.load_municipal_candidates()
+        except Exception as exc:
+            logger.warning("Could not load municipal candidates (%s).", exc)
 
     def search(self, query: str, limit: int = 15) -> SearchResultResponse:
         """Searches across municipalities and Senate districts."""

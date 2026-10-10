@@ -53,7 +53,8 @@ async def handle_list_tools() -> list[Tool]:
             description=(
                 "Získá výsledky voleb do zastupitelstva konkrétní obce nebo města (komunální volby 2026). "
                 "Uveďte název obce (např. 'Praha', 'Brno', 'Ostrava', 'Plzeň') nebo šestimístný kód obce ČSÚ (např. '554782'). "
-                "Vrací volební účast, počet volených zastupitelů, % sečtených okrsků a výsledky kandidujících stran včetně mandátů."
+                "Vrací volební účast, počet volených zastupitelů, % sečtených okrsků, výsledky kandidujících stran včetně mandátů, "
+                "a jmenný seznam zvolených zastupitelů i kandidátů včetně jejich přednostních hlasů (křížků)."
             ),
             inputSchema={
                 "type": "object",

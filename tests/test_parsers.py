@@ -398,3 +398,96 @@ def test_parse_senate_round_2_pending():
     d = res.districts[0]
     assert d.is_completed is False
     assert "sčítání ještě nezačalo" in d.status_summary
+
+
+def test_parse_municipal_results_with_candidates():
+    """Verifies parsing of municipal XML containing candidates and elected representatives."""
+    MUNICIPAL_CANDIDATES_XML = """<?xml version="1.0" encoding="utf-8"?>
+    <VYSLEDKY_OBEC xmlns="http://www.volby.cz/kv/" DATUM_CAS_GENEROVANI="2026-10-10T17:00:00">
+      <OBEC KODZASTUP="554782" NAZEVZAST="Praha hl.m." OZNAC_TYPU="OBEC" VOLENO_ZASTUP="3" POCET_OBVODU="1" JE_SPOCTENO="1">
+        <VYSLEDEK>
+          <UCAST OKRSKY_CELKEM="10" OKRSKY_ZPRAC="10" OKRSKY_ZPRAC_PROC="100.00" ZAPSANI_VOLICI="10000" VYDANE_OBALKY="5000" UCAST_PROC="50.00" PLATNE_HLASY="15000"/>
+          <VOLEBNI_STRANA POR_STR_HLAS_LIST="1" VSTRANA="101" NAZEV_STRANY="Koalice Modrá" HLASY="9000" HLASY_PROC="60.00" KANDIDATU_POCET="3" ZASTUPITELE_POCET="2" ZASTUPITELE_PROC="66.67">
+            <ZASTUPITEL PORADOVE_CISLO="1" JMENO="Martin" PRIJMENI="Dvořák" TITULPRED="Ing." TITULZA="" HLASY="3500" HLASY_PROC="38.89" PORADI_ZVOLENI="1" MANDAT="A"/>
+            <ZASTUPITEL PORADOVE_CISLO="2" JMENO="Klára" PRIJMENI="Veselá" TITULPRED="MUDr." TITULZA="" HLASY="3200" HLASY_PROC="35.56" PORADI_ZVOLENI="2" MANDAT="A"/>
+            <KANDIDAT PORADOVE_CISLO="3" JMENO="Tomáš" PRIJMENI="Černý" TITULPRED="" TITULZA="" HLASY="2300" HLASY_PROC="25.56" MANDAT="N" ZVOLEN="0"/>
+          </VOLEBNI_STRANA>
+          <VOLEBNI_STRANA POR_STR_HLAS_LIST="2" VSTRANA="102" NAZEV_STRANY="Hnutí Zelené" HLASY="6000" HLASY_PROC="40.00" KANDIDATU_POCET="2" ZASTUPITELE_POCET="1" ZASTUPITELE_PROC="33.33">
+            <ZASTUPITEL PORADOVE_CISLO="1" JMENO="Lenka" PRIJMENI="Králová" TITULPRED="Mgr." TITULZA="Ph.D." HLASY="4000" HLASY_PROC="66.67" PORADI_ZVOLENI="1" MANDAT="A"/>
+            <KANDIDAT PORADOVE_CISLO="2" JMENO="Jakub" PRIJMENI="Moravec" TITULPRED="" TITULZA="" HLASY="2000" HLASY_PROC="33.33" MANDAT="N" ZVOLEN="0"/>
+          </VOLEBNI_STRANA>
+        </VYSLEDEK>
+      </OBEC>
+    </VYSLEDKY_OBEC>
+    """
+    root = ET.fromstring(MUNICIPAL_CANDIDATES_XML)
+    res = parse_municipal_results(root)
+
+    assert res.municipality_code == "554782"
+    assert res.is_completed is True
+
+    # Check party 1 candidates
+    p1 = res.parties[0]
+    assert p1.party_name == "Koalice Modrá"
+    assert len(p1.candidates) == 3
+    assert len(p1.elected_candidates) == 2
+
+    c1 = p1.candidates[0]
+    assert c1.first_name == "Martin"
+    assert c1.last_name == "Dvořák"
+    assert c1.votes == 3500
+    assert c1.is_elected is True
+    assert c1.mandate_status == "Zvolen"
+    assert c1.order_elected == 1
+
+    c3 = p1.candidates[2]
+    assert c3.first_name == "Tomáš"
+    assert c3.last_name == "Černý"
+    assert c3.votes == 2300
+    assert c3.is_elected is False
+    assert c3.mandate_status == "Náhradník"
+
+    # Check top-level elected council members (across all parties)
+    assert len(res.elected_representatives) == 3
+    names_elected = [f"{c.first_name} {c.last_name}" for c in res.elected_representatives]
+    assert "Martin Dvořák" in names_elected
+    assert "Klára Veselá" in names_elected
+    assert "Lenka Králová" in names_elected
+
+
+def test_parse_municipal_results_with_candidate_registry():
+    """Verifies that candidate names are matched from candidate registry if missing in XML."""
+    XML_WITHOUT_NAMES = """<?xml version="1.0" encoding="utf-8"?>
+    <VYSLEDKY_OBEC xmlns="http://www.volby.cz/kv/" DATUM_CAS_GENEROVANI="2026-10-10T17:00:00">
+      <OBEC KODZASTUP="554782" NAZEVZAST="Praha hl.m." OZNAC_TYPU="OBEC" VOLENO_ZASTUP="1" POCET_OBVODU="1" JE_SPOCTENO="1">
+        <VYSLEDEK>
+          <UCAST OKRSKY_CELKEM="10" OKRSKY_ZPRAC="10" OKRSKY_ZPRAC_PROC="100.00" ZAPSANI_VOLICI="10000" VYDANE_OBALKY="5000" UCAST_PROC="50.00" PLATNE_HLASY="5000"/>
+          <VOLEBNI_STRANA POR_STR_HLAS_LIST="1" VSTRANA="101" NAZEV_STRANY="Lokální sdružení" HLASY="5000" HLASY_PROC="100.00" KANDIDATU_POCET="1" ZASTUPITELE_POCET="1" ZASTUPITELE_PROC="100.00">
+            <ZASTUPITEL PORADOVE_CISLO="1" HLASY="5000" HLASY_PROC="100.00" PORADI_ZVOLENI="1" MANDAT="A"/>
+          </VOLEBNI_STRANA>
+        </VYSLEDEK>
+      </OBEC>
+    </VYSLEDKY_OBEC>
+    """
+    registry = {
+        ("554782", 101, 1): {
+            "first_name": "Alena",
+            "last_name": "Nováková",
+            "title_pre": "Ing.",
+            "title_post": "",
+            "party_name": "Lokální sdružení",
+            "nominating_party": "Lokální sdružení",
+            "political_affiliation": "BEZPP",
+        }
+    }
+    root = ET.fromstring(XML_WITHOUT_NAMES)
+    res = parse_municipal_results(root, candidate_registry=registry)
+
+    assert len(res.elected_representatives) == 1
+    elected = res.elected_representatives[0]
+    assert elected.candidate_number == 1
+    assert elected.first_name == "Alena"
+    assert elected.last_name == "Nováková"
+    assert elected.title_pre == "Ing."
+    assert elected.is_elected is True
+    assert elected.votes == 5000

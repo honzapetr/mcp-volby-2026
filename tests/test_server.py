@@ -94,6 +94,13 @@ async def test_mcp_call_breakdown_and_coalition_tools():
     assert "scenarios" in res_c[0].text
     assert "majority_seats" in res_c[0].text
 
+    # Test municipal results tool with candidate response
+    res_m = await handle_call_tool("get_municipal_results", {"obec": "Praha"})
+    assert len(res_m) == 1
+    assert "Praha hl.m." in res_m[0].text
+    assert "parties" in res_m[0].text
+    assert "elected_representatives" in res_m[0].text
+
 
 @pytest.mark.asyncio
 async def test_api_live_endpoints(client):
@@ -135,6 +142,7 @@ async def test_api_live_endpoints(client):
     assert data_praha["winner"] == "Koalice A"
     assert data_praha["wasted_votes_pct"] == 3.00
     assert len(data_praha["parties"]) > 0
+    assert "elected_representatives" in data_praha
 
     # Test coalition scenarios for Praha
     res_coalition = client.get("/api/obce/Praha/koalice")
