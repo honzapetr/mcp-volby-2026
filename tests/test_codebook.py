@@ -118,3 +118,52 @@ def test_candidate_affiliation():
 
     empty_aff = index.get_candidate_affiliation(99, 99)
     assert empty_aff["party_name"] == ""
+
+
+def test_municipal_candidate_info_and_party_candidates():
+    index = CodebookIndex()
+    c1 = {
+        "candidate_number": 1,
+        "first_name": "Petr",
+        "last_name": "Myslivec",
+        "title_pre": "Ing.",
+        "title_post": "",
+        "party_name": "BOR NÁS SPOJUJE",
+        "nominating_party": "STAN",
+        "political_affiliation": "BezPP",
+        "age": 57,
+        "occupation": "obchodní ředitel",
+    }
+    c2 = {
+        "candidate_number": 2,
+        "first_name": "František",
+        "last_name": "Vokroj",
+        "title_pre": "Mgr.",
+        "title_post": "",
+        "party_name": "BOR NÁS SPOJUJE",
+        "nominating_party": "NK",
+        "political_affiliation": "BezPP",
+        "age": 50,
+        "occupation": "vedoucí oddělení",
+    }
+
+    index.municipal_candidates[("560758", 5, 1)] = c1
+    index.municipal_candidates[("560758", 5, 2)] = c2
+    index.municipal_candidates_by_party[("560758", 5)] = [c1, c2]
+
+    # Test single candidate lookup
+    cand = index.get_municipal_candidate_info("560758", 5, 1)
+    assert cand["first_name"] == "Petr"
+    assert cand["political_affiliation"] == "BezPP"
+    assert cand["nominating_party"] == "STAN"
+
+    # Test party candidates lookup
+    party_cands = index.get_municipal_party_candidates("560758", 5)
+    assert len(party_cands) == 2
+    assert party_cands[0]["candidate_number"] == 1
+    assert party_cands[1]["candidate_number"] == 2
+
+    # Non-existent party
+    empty_list = index.get_municipal_party_candidates("560758", 99)
+    assert empty_list == []
+

@@ -64,15 +64,28 @@ class CSUClient:
         if self._client and not self._client.is_closed:
             await self._client.aclose()
 
-    async def _fetch_with_retry(self, url: str) -> bytes:
+    async def _fetch_with_retry(self, url: str, timeout: Optional[float] = None) -> bytes:
         """Executes GET request with exponential backoff retry."""
         client = await self.get_client()
         last_error = None
+        req_timeout = httpx.Timeout(timeout) if timeout is not None else httpx.Timeout(self.timeout)
         for attempt in range(1, self.max_retries + 1):
             try:
-                resp = await client.get(url)
+                resp = await client.get(url, timeout=req_timeout)
                 resp.raise_for_status()
                 return resp.content
+            except httpx.HTTPStatusError as exc:
+                last_error = exc
+                if exc.response.status_code in (400, 401, 403, 404):
+                    # Permanent client error; fail fast without retrying
+                    break
+                wait_time = 0.5 * (2 ** (attempt - 1))
+                logger.warning(
+                    "Error fetching %s (attempt %d/%d): %s. Retrying in %.2fs",
+                    url, attempt, self.max_retries, exc, wait_time
+                )
+                if attempt < self.max_retries:
+                    await asyncio.sleep(wait_time)
             except (httpx.HTTPError, httpx.RequestError) as exc:
                 last_error = exc
                 wait_time = 0.5 * (2 ** (attempt - 1))
@@ -85,6 +98,21 @@ class CSUClient:
 
         logger.error("Failed to fetch %s after %d attempts: %s", url, self.max_retries, last_error)
         raise RuntimeError(f"Chyba při stahování dat z ČSÚ ({url}): {last_error}")
+
+    async def get_bytes(self, url: str, ttl: Optional[int] = None, timeout: Optional[float] = None) -> bytes:
+        """Fetches raw bytes with in-memory caching."""
+        effective_ttl = ttl if ttl is not None else self.cache_ttl
+        cache_key = f"bytes:{url}"
+
+        async with self._lock:
+            if cache_key in self._cache and not self._cache[cache_key].is_expired():
+                return self._cache[cache_key].data
+
+        content = await self._fetch_with_retry(url, timeout=timeout)
+        async with self._lock:
+            self._cache[cache_key] = CacheEntry(content, effective_ttl)
+
+        return content
 
     async def get_xml(self, url: str, ttl: Optional[int] = None) -> ET.Element:
         """Fetches and parses XML document with caching."""
@@ -108,7 +136,7 @@ class CSUClient:
 
         return root
 
-    async def get_zip_json(self, url: str, json_filename: str, ttl: int = 3600) -> Any:
+    async def get_zip_json(self, url: str, json_filename: str, ttl: int = 3600, timeout: Optional[float] = None) -> Any:
         """Downloads a zip archive and extracts a JSON file (used for codebooks)."""
         cache_key = f"json_zip:{url}:{json_filename}"
 
@@ -116,7 +144,7 @@ class CSUClient:
             if cache_key in self._cache and not self._cache[cache_key].is_expired():
                 return self._cache[cache_key].data
 
-        content = await self._fetch_with_retry(url)
+        content = await self.get_bytes(url, ttl=ttl, timeout=timeout)
         try:
             with zipfile.ZipFile(io.BytesIO(content)) as zf:
                 raw_json = zf.read(json_filename).decode("utf-8")

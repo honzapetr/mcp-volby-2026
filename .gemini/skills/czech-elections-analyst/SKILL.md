@@ -116,7 +116,7 @@ Server **volby-cr-2026** exponuje následující sadu specializovaných nástroj
 | `get_election_overview` | *(žádné)* | Celostátní souhrn voleb: stav sčítání, účast, zpracované okrsky pro Senát i Obce. |
 | `get_senate_results` | `obvod` *(volitelné: číslo nebo název)* | Výsledky Senátu za všech 27 volených obvodů nebo konkrétní obvod (včetně 2. kola, stran, lead/cutoff margin). |
 | `get_senate_district_breakdown` | `obvod` *(povinné: číslo nebo název)* | Hlasy pro kandidáty po jednotlivých obcích senátního obvodu (včetně stranické příslušnosti a lídrů obcí). |
-| `get_municipal_results` | `obec` *(povinné: název nebo kód)* | Výsledky komunálních voleb v obci: mandáty, hlasy, `majority_seats`, `wasted_votes_pct`, `winner`/`leading_party`, jmenný seznam kandidátů (hlasy/křížky) a zvolení zastupitelé (`elected_representatives`). |
+| `get_municipal_results` | `obec` *(povinné: název nebo kód)* | Výsledky komunálních voleb v obci: mandáty, hlasy, `majority_seats`, `wasted_votes_pct`, `winner`/`leading_party`, kompletní kandidátní listiny se stranickou příslušností (`political_affiliation`), navrhující stranou, věkem, povoláním, jmenný seznam kandidátů (hlasy/křížky) a zvolení zastupitelé (`elected_representatives`). |
 | `get_coalition_scenarios` | `obec` *(povinné: název nebo kód)* | Povolební koaliční matematika: jednobarevné většiny a minimální vítězné koalice (MWC). |
 | `search_municipality_or_district` | `query` *(povinné: str)*, `limit` *(int)* | Vyhledávač obcí a senátních obvodů s tolerancí diakritiky a číselných kódů. |
 | `get_live_counting_progress` | *(žádné)* | Živá telemetrie rychlosti sčítání a průběžný stavový komentář. |

@@ -11,7 +11,7 @@ import json
 import logging
 import unicodedata
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.client_csu import csu_client
 from src.config import settings
@@ -130,7 +130,11 @@ class CodebookIndex:
         self.municipalities: Dict[str, SearchResultItem] = {}  # code -> item
         self.senate_districts: Dict[int, SearchResultItem] = {}  # district_num -> item
         self.senate_candidates: Dict[Tuple[int, int], Dict[str, str]] = {}  # (district, cand_num) -> info
-        self.municipal_candidates: Dict[Tuple[str, int, int], Dict[str, str]] = {}  # (kod_zastup, party_id, cand_num) -> info
+        self.municipal_candidates: Dict[Tuple[str, int, int], Dict[str, Any]] = {}  # (kod_zastup, party_id_or_list, cand_num) -> info
+        self.municipal_candidates_by_party: Dict[Tuple[str, int], List[Dict[str, Any]]] = {}  # (kod_zastup, list_num) -> [cands]
+        self.political_affiliations: Dict[int, str] = {}  # pstrana_id -> name
+        self.nominating_parties: Dict[int, str] = {}  # nstrana_id -> name
+        self.municipal_parties: Dict[Tuple[str, int], str] = {}  # (kod_zastup, list_num) -> party_name
         self._initialized = False
 
     def initialize_defaults(self):
@@ -167,15 +171,15 @@ class CodebookIndex:
     async def load_senate_candidates(self):
         """Optionally loads candidate party affiliations from CSU Senate registry (serk.json)."""
         candidate_urls = [
-            f"{settings.CSU_BASE_URL}/opendata/senat/SE2026reg20261007_json.zip",
-            f"{settings.CSU_BASE_URL}/opendata/senat/{settings.SENAT_ELECTION_CODE}/SE2026reg20261007_json.zip",
             f"{settings.CSU_BASE_URL}/opendata/se2026/SE2026reg20261007_json.zip",
             "https://volby.cz/opendata/se2026/SE2026reg20261007_json.zip",
+            f"{settings.CSU_BASE_URL}/opendata/senat/{settings.SENAT_ELECTION_CODE}/SE2026reg20261007_json.zip",
+            f"{settings.CSU_BASE_URL}/opendata/senat/SE2026reg20261007_json.zip",
         ]
         data = None
         for url in candidate_urls:
             try:
-                data = await csu_client.get_zip_json(url, "serk.json", ttl=86400)
+                data = await csu_client.get_zip_json(url, "serk.json", ttl=86400, timeout=settings.CODEBOOK_ZIP_TIMEOUT_SECONDS)
                 if data:
                     break
             except Exception:
@@ -230,10 +234,15 @@ class CodebookIndex:
             "political_affiliation": "",
         })
 
-    def get_municipal_candidate_info(self, kod_zastup: str, party_id: int, candidate_num: int) -> Dict[str, str]:
+    def get_municipal_candidate_info(
+        self, kod_zastup: str, party_id: int, candidate_num: int, list_number: Optional[int] = None
+    ) -> Dict[str, Any]:
         """Returns candidate details from municipal candidate registry (kvrk.json)."""
         kod_clean = str(kod_zastup).strip().zfill(6)
-        return self.municipal_candidates.get((kod_clean, party_id, candidate_num), {
+        cand = self.municipal_candidates.get((kod_clean, party_id, candidate_num))
+        if not cand and list_number is not None:
+            cand = self.municipal_candidates.get((kod_clean, list_number, candidate_num))
+        return cand or {
             "first_name": "",
             "last_name": "",
             "title_pre": "",
@@ -241,18 +250,55 @@ class CodebookIndex:
             "party_name": "",
             "nominating_party": "",
             "political_affiliation": "",
-        })
+            "age": None,
+            "occupation": "",
+        }
+
+    def get_municipal_party_candidates(
+        self, kod_zastup: str, list_number: int, party_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """Returns all registered candidates for a party/list in a municipality sorted by number."""
+        kod_clean = str(kod_zastup).strip().zfill(6)
+        cands = self.municipal_candidates_by_party.get((kod_clean, list_number))
+        if not cands and party_id is not None:
+            cands = self.municipal_candidates_by_party.get((kod_clean, party_id))
+        if cands:
+            return sorted(cands, key=lambda c: c.get("candidate_number", 0))
+        return []
 
     async def load_municipal_candidates(self):
-        """Optionally loads candidate registry for municipal elections from CSU open data (kvrk.json)."""
+        """Optionally loads candidate registry for municipal elections from CSU open data (kvrk.json, kvros.json)."""
         candidate_urls = [
             f"{settings.CSU_BASE_URL}/opendata/{settings.KV_VERSION}/KV2026reg20261007_json.zip",
             f"https://volby.cz/opendata/{settings.KV_VERSION}/KV2026reg20261007_json.zip",
         ]
+
+        # Load party registered names for municipalities from kvros.json
+        for url in candidate_urls:
+            try:
+                ros_data = await csu_client.get_zip_json(url, "kvros.json", ttl=86400, timeout=settings.CODEBOOK_ZIP_TIMEOUT_SECONDS)
+                if ros_data:
+                    items = (ros_data.get("polozky") or ros_data.get("položky") or []) if isinstance(ros_data, dict) else (ros_data if isinstance(ros_data, list) else [])
+                    for item in items:
+                        raw_kod = item.get("KODZASTUP", 0)
+                        raw_list = item.get("POR_STR_HL", 0)
+                        p_name = item.get("NAZEVCELK") or item.get("ZKRATKAO30", "")
+                        try:
+                            kod = str(raw_kod).strip().zfill(6)
+                            list_num = int(raw_list)
+                            if kod and list_num:
+                                self.municipal_parties[(kod, list_num)] = str(p_name).strip()
+                        except (ValueError, TypeError):
+                            continue
+                    break
+            except Exception:
+                continue
+
+        # Load municipal candidates from kvrk.json
         data = None
         for url in candidate_urls:
             try:
-                data = await csu_client.get_zip_json(url, "kvrk.json", ttl=86400)
+                data = await csu_client.get_zip_json(url, "kvrk.json", ttl=86400, timeout=settings.CODEBOOK_ZIP_TIMEOUT_SECONDS)
                 if data:
                     break
             except Exception:
@@ -265,10 +311,12 @@ class CodebookIndex:
         count = 0
         for item in items:
             raw_kod = item.get("KODZASTUP", item.get("kod_zastup", 0))
-            raw_party = item.get("VSTRANA", item.get("POR_STR_HLAS_LIST", item.get("vstrana", 0)))
-            raw_ckand = item.get("POR_CISLO", item.get("CKAND", item.get("poradove_cislo", 0)))
+            raw_list = item.get("POR_STR_HL", item.get("POR_STR_HLAS_LIST", 0))
+            raw_party = item.get("OSTRANA", item.get("VSTRANA", raw_list))
+            raw_ckand = item.get("PORCISLO", item.get("POR_CISLO", item.get("CKAND", item.get("poradove_cislo", 0))))
             try:
                 kod = str(raw_kod).strip().zfill(6)
+                list_num = int(raw_list)
                 party_id = int(raw_party)
                 ckand = int(raw_ckand)
             except (ValueError, TypeError):
@@ -278,12 +326,36 @@ class CodebookIndex:
             last_name = item.get("PRIJMENI", item.get("prijmeni", ""))
             title_pre = item.get("TITULPRED", item.get("titulpred", ""))
             title_post = item.get("TITULZA", item.get("titulza", ""))
-            party_name = item.get("NAZEV_VSTR", item.get("NAZEV_STRANY", ""))
-            nom_party = item.get("NAZEV_NSTR", item.get("NAVRH_STRANA", ""))
-            pol_aff = item.get("NAZEV_PSTR", item.get("POL_PRISL", ""))
+
+            pstrana_raw = item.get("PSTRANA")
+            pol_aff = item.get("NAZEV_PSTR", "")
+            if not pol_aff and pstrana_raw is not None:
+                try:
+                    pol_aff = self.political_affiliations.get(int(pstrana_raw), str(pstrana_raw))
+                except (ValueError, TypeError):
+                    pol_aff = str(pstrana_raw)
+
+            nstrana_raw = item.get("NSTRANA")
+            nom_party = item.get("NAZEV_NSTR", "")
+            if not nom_party and nstrana_raw is not None:
+                try:
+                    nom_party = self.nominating_parties.get(int(nstrana_raw), str(nstrana_raw))
+                except (ValueError, TypeError):
+                    nom_party = str(nstrana_raw)
+
+            party_name = (
+                item.get("NAZEV_VSTR", "")
+                or item.get("NAZEV_STRANY", "")
+                or self.municipal_parties.get((kod, list_num), "")
+            )
+
+            age_raw = item.get("VEK")
+            age = int(age_raw) if age_raw is not None and str(age_raw).isdigit() else None
+            occupation = item.get("POVOLANI", "")
 
             if kod and ckand:
-                self.municipal_candidates[(kod, party_id, ckand)] = {
+                cand_info = {
+                    "candidate_number": ckand,
                     "first_name": str(first_name or ""),
                     "last_name": str(last_name or ""),
                     "title_pre": str(title_pre or ""),
@@ -291,58 +363,113 @@ class CodebookIndex:
                     "party_name": str(party_name or ""),
                     "nominating_party": str(nom_party or ""),
                     "political_affiliation": str(pol_aff or ""),
+                    "age": age,
+                    "occupation": str(occupation or ""),
                 }
+                # Index by party_id and list_number
+                self.municipal_candidates[(kod, party_id, ckand)] = cand_info
+                if list_num != party_id:
+                    self.municipal_candidates[(kod, list_num, ckand)] = cand_info
+
+                # Index by party list
+                key_list = (kod, list_num)
+                if key_list not in self.municipal_candidates_by_party:
+                    self.municipal_candidates_by_party[key_list] = []
+                self.municipal_candidates_by_party[key_list].append(cand_info)
+
+                if party_id != list_num:
+                    key_party = (kod, party_id)
+                    if key_party not in self.municipal_candidates_by_party:
+                        self.municipal_candidates_by_party[key_party] = []
+                    self.municipal_candidates_by_party[key_party].append(cand_info)
+
                 count += 1
 
         logger.info("Loaded %d municipal candidates from CSU open data (kvrk.json).", count)
 
     async def load_remote_codebooks(self):
-        """Optionally loads complete nationwide municipality list from CSU open data."""
+        """Optionally loads complete nationwide municipality list and codebooks from CSU open data."""
         try:
             self.initialize_defaults()
-            kvcoco_urls = [
+            ciselniky_urls = [
                 f"{settings.CSU_BASE_URL}/opendata/{settings.KV_VERSION}/KV2026ciselniky20261007_json.zip",
                 f"https://volby.cz/opendata/{settings.KV_VERSION}/KV2026ciselniky20261007_json.zip",
             ]
-            data = None
-            for url in kvcoco_urls:
+
+            # Load political affiliations (cpp.json)
+            for url in ciselniky_urls:
                 try:
-                    data = await csu_client.get_zip_json(url, "kvcoco.json", ttl=86400)
+                    cpp_data = await csu_client.get_zip_json(url, "cpp.json", ttl=86400, timeout=settings.CODEBOOK_ZIP_TIMEOUT_SECONDS)
+                    if cpp_data:
+                        items = (cpp_data.get("polozky") or cpp_data.get("položky") or []) if isinstance(cpp_data, dict) else (cpp_data if isinstance(cpp_data, list) else [])
+                        for item in items:
+                            pid = item.get("PSTRANA")
+                            pname = item.get("ZKRATKAP30") or item.get("NAZEV_PSTR", "")
+                            if pid is not None:
+                                try:
+                                    self.political_affiliations[int(pid)] = str(pname).strip()
+                                except (ValueError, TypeError):
+                                    pass
+                        break
+                except Exception:
+                    continue
+
+            # Load nominating parties (cns.json)
+            for url in ciselniky_urls:
+                try:
+                    cns_data = await csu_client.get_zip_json(url, "cns.json", ttl=86400, timeout=settings.CODEBOOK_ZIP_TIMEOUT_SECONDS)
+                    if cns_data:
+                        items = (cns_data.get("polozky") or cns_data.get("položky") or []) if isinstance(cns_data, dict) else (cns_data if isinstance(cns_data, list) else [])
+                        for item in items:
+                            nid = item.get("NSTRANA")
+                            nname = item.get("ZKRATKAN30") or item.get("NAZEV_NSTR", "")
+                            if nid is not None:
+                                try:
+                                    self.nominating_parties[int(nid)] = str(nname).strip()
+                                except (ValueError, TypeError):
+                                    pass
+                        break
+                except Exception:
+                    continue
+
+            # Load municipalities (kvcoco.json)
+            data = None
+            for url in ciselniky_urls:
+                try:
+                    data = await csu_client.get_zip_json(url, "kvcoco.json", ttl=86400, timeout=settings.CODEBOOK_ZIP_TIMEOUT_SECONDS)
                     if data:
                         break
                 except Exception:
                     continue
 
-            if not data:
-                return
+            if data:
+                items = (data.get("polozky") or data.get("položky") or []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                count_added = 0
+                for item in items:
+                    raw_kod = item.get("KODZASTUP", item.get("kód", item.get("kod", "")))
+                    kod = str(raw_kod).strip().zfill(6)
+                    nazev = item.get("NAZEVZAST", "")
+                    if not nazev and isinstance(item.get("název"), dict):
+                        nazev = item["název"].get("cs", "")
+                    elif not nazev and isinstance(item.get("nazev"), dict):
+                        nazev = item["nazev"].get("cs", "")
+                    elif not nazev:
+                        nazev = str(item.get("název", item.get("nazev", ""))).strip()
+                    nuts = str(item.get("NUTS", item.get("nuts", "")))
 
-            items = (data.get("polozky") or data.get("položky") or []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
-            count_added = 0
-            for item in items:
-                raw_kod = item.get("KODZASTUP", item.get("kód", item.get("kod", "")))
-                kod = str(raw_kod).strip().zfill(6)
-                nazev = item.get("NAZEVZAST", "")
-                if not nazev and isinstance(item.get("název"), dict):
-                    nazev = item["název"].get("cs", "")
-                elif not nazev and isinstance(item.get("nazev"), dict):
-                    nazev = item["nazev"].get("cs", "")
-                elif not nazev:
-                    nazev = str(item.get("název", item.get("nazev", ""))).strip()
-                nuts = str(item.get("NUTS", item.get("nuts", "")))
+                    if kod and nazev and kod != "000000":
+                        # Protect curated MAJOR_CITIES clean names from being overwritten by verbose official names
+                        if kod not in self.municipalities:
+                            self.municipalities[kod] = SearchResultItem(
+                                item_type="obec",
+                                code=kod,
+                                name=nazev,
+                                district_nuts=nuts if nuts else None,
+                                description=f"Obec / zastupitelstvo {nazev} (kód {kod})",
+                            )
+                            count_added += 1
 
-                if kod and nazev and kod != "000000":
-                    # Protect curated MAJOR_CITIES clean names from being overwritten by verbose official names
-                    if kod not in self.municipalities:
-                        self.municipalities[kod] = SearchResultItem(
-                            item_type="obec",
-                            code=kod,
-                            name=nazev,
-                            district_nuts=nuts if nuts else None,
-                            description=f"Obec / zastupitelstvo {nazev} (kód {kod})",
-                        )
-                        count_added += 1
-
-            logger.info("Loaded %d additional municipalities from CSU open data.", count_added)
+                logger.info("Loaded %d additional municipalities from CSU open data.", count_added)
         except Exception as exc:
             logger.warning(
                 "Could not load extended remote codebooks from CSU (%s). Using bundled defaults.",

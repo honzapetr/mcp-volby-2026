@@ -30,14 +30,15 @@ class Settings(BaseSettings):
     DEFAULT_SEARCH_LIMIT: int = 15
 
     # Official CSU (Czech Statistical Office) election endpoints
-    CSU_BASE_URL: str = "https://volby.gov.cz"
+    CSU_BASE_URL: str = "https://volby.cz"
     SENAT_ELECTION_CODE: str = "20261009"
     KV_ELECTION_CODE: str = "20261009"
     KV_VERSION: str = "kv2026"
 
     # HTTP client & caching configuration
     CACHE_TTL_SECONDS: int = 30
-    HTTP_TIMEOUT_SECONDS: float = 15.0
+    HTTP_TIMEOUT_SECONDS: float = 30.0
+    CODEBOOK_ZIP_TIMEOUT_SECONDS: float = 60.0
     HTTP_MAX_RETRIES: int = 3
     USER_AGENT: str = "CzechElectionsMCP/1.0 (+https://volby.gov.cz; AI Assistant Integration)"
 

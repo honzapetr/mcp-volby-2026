@@ -2,7 +2,7 @@
 
 import logging
 import xml.etree.ElementTree as ET
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.models import (
     MunicipalCandidateResult,
@@ -21,13 +21,62 @@ def _strip_ns(tag: str) -> str:
     return tag
 
 
+def _get_candidate_info_from_registry(
+    registry: Optional[Any],
+    kod_zastup: str,
+    party_id: Optional[int],
+    list_number: Optional[int],
+    cand_num: int,
+) -> Optional[Dict[str, Any]]:
+    """Helper to look up candidate in codebook_index or a dict registry."""
+    if registry is None:
+        return None
+    kod_clean = str(kod_zastup).strip().zfill(6)
+    if hasattr(registry, "get_municipal_candidate_info"):
+        info = registry.get_municipal_candidate_info(kod_clean, party_id or 0, cand_num, list_number=list_number)
+        if info and (info.get("first_name") or info.get("last_name") or info.get("political_affiliation")):
+            return info
+        return None
+    elif isinstance(registry, dict):
+        if party_id is not None and (kod_clean, party_id, cand_num) in registry:
+            return registry[(kod_clean, party_id, cand_num)]
+        if list_number is not None and (kod_clean, list_number, cand_num) in registry:
+            return registry[(kod_clean, list_number, cand_num)]
+    return None
+
+
+def _get_party_candidates_from_registry(
+    registry: Optional[Any],
+    kod_zastup: str,
+    list_number: int,
+    party_id: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """Helper to retrieve all registered candidates for a party list from registry."""
+    if registry is None:
+        return []
+    kod_clean = str(kod_zastup).strip().zfill(6)
+    if hasattr(registry, "get_municipal_party_candidates"):
+        return registry.get_municipal_party_candidates(kod_clean, list_number, party_id)
+    elif isinstance(registry, dict):
+        results = []
+        for (k, p, c_num), info in registry.items():
+            if str(k).strip().zfill(6) == kod_clean and (p == list_number or (party_id is not None and p == party_id)):
+                cand_copy = dict(info)
+                cand_copy.setdefault("candidate_number", c_num)
+                results.append(cand_copy)
+        results.sort(key=lambda x: x.get("candidate_number", 0))
+        return results
+    return []
+
+
 def _parse_candidate_elem(
     elem: ET.Element,
     party_name: Optional[str],
     party_id: Optional[int],
     kod_zastup: str,
     tag: str,
-    candidate_registry: Optional[Dict[Tuple[str, int, int], Dict[str, str]]] = None,
+    list_number: Optional[int] = None,
+    candidate_registry: Optional[Any] = None,
 ) -> MunicipalCandidateResult:
     """Parses an individual municipal candidate or elected representative XML element."""
     cand_num_raw = (
@@ -41,17 +90,32 @@ def _parse_candidate_elem(
     last_name = elem.attrib.get("PRIJMENI", "")
     title_pre = elem.attrib.get("TITULPRED", "")
     title_post = elem.attrib.get("TITULZA", "")
+    nominating_party = elem.attrib.get("NAVRH_STRANA", "")
+    political_affiliation = elem.attrib.get("POL_PRISL", "")
+    age_raw = elem.attrib.get("VEK")
+    age = int(age_raw) if age_raw is not None and str(age_raw).isdigit() else None
+    occupation = elem.attrib.get("POVOLANI", "")
 
-    # If name details are missing in XML, attempt lookup in candidate registry
-    if (not first_name or not last_name) and candidate_registry:
-        reg_info = candidate_registry.get((str(kod_zastup).zfill(6), party_id or 0, cand_num))
-        if reg_info:
-            first_name = first_name or reg_info.get("first_name", "")
-            last_name = last_name or reg_info.get("last_name", "")
-            title_pre = title_pre or reg_info.get("title_pre", "")
-            title_post = title_post or reg_info.get("title_post", "")
-            if not party_name and reg_info.get("party_name"):
-                party_name = reg_info.get("party_name")
+    # Look up in candidate registry to complement or enrich candidate details
+    reg_info = _get_candidate_info_from_registry(
+        candidate_registry,
+        kod_zastup=kod_zastup,
+        party_id=party_id,
+        list_number=list_number,
+        cand_num=cand_num,
+    )
+    if reg_info:
+        first_name = first_name or reg_info.get("first_name", "")
+        last_name = last_name or reg_info.get("last_name", "")
+        title_pre = title_pre or reg_info.get("title_pre", "")
+        title_post = title_post or reg_info.get("title_post", "")
+        if not party_name and reg_info.get("party_name"):
+            party_name = reg_info.get("party_name")
+        nominating_party = nominating_party or reg_info.get("nominating_party", "")
+        political_affiliation = political_affiliation or reg_info.get("political_affiliation", "")
+        if age is None and reg_info.get("age") is not None:
+            age = reg_info.get("age")
+        occupation = occupation or reg_info.get("occupation", "")
 
     votes = int(elem.attrib.get("HLASY", 0))
     votes_pct = float(elem.attrib.get("HLASY_PROC", 0.0))
@@ -82,6 +146,10 @@ def _parse_candidate_elem(
         title_post=title_post,
         party_name=party_name,
         party_id=party_id,
+        nominating_party=nominating_party or None,
+        political_affiliation=political_affiliation or None,
+        age=age,
+        occupation=occupation or None,
         votes=votes,
         votes_pct=votes_pct,
         is_elected=is_elected,
@@ -92,16 +160,16 @@ def _parse_candidate_elem(
 
 def parse_municipal_results(
     root: ET.Element,
-    candidate_registry: Optional[Dict[Tuple[str, int, int], Dict[str, str]]] = None,
+    candidate_registry: Optional[Any] = None,
 ) -> MunicipalResultResponse:
     """Parses vysledky_obec_XXXXXX.xml for a specific town or city council."""
     # Lazy import candidate registry from codebooks if not passed explicitly
     if candidate_registry is None:
         try:
             from src.parsers.codebook_loader import codebook_index
-            candidate_registry = codebook_index.municipal_candidates
+            candidate_registry = codebook_index
         except Exception:
-            candidate_registry = {}
+            candidate_registry = None
 
     generated_at = root.attrib.get("DATUM_CAS_GENEROVANI", "")
 
@@ -171,12 +239,44 @@ def parse_municipal_results(
                         party_id=party_id,
                         kod_zastup=kod_zastup,
                         tag=sub_tag,
+                        list_number=list_number,
                         candidate_registry=candidate_registry,
                     )
                     party_candidates.append(cand)
                     if cand.is_elected:
                         party_elected.append(cand)
                         all_elected.append(cand)
+
+            # If no candidate sub-elements are present in XML (e.g. during counting),
+            # populate candidates from candidate registry if available
+            if not party_candidates and candidate_registry:
+                reg_cands = _get_party_candidates_from_registry(
+                    candidate_registry,
+                    kod_zastup=kod_zastup,
+                    list_number=list_number,
+                    party_id=party_id,
+                )
+                for rc in reg_cands:
+                    c_num = rc.get("candidate_number") or rc.get("cand_num") or 0
+                    cand = MunicipalCandidateResult(
+                        candidate_number=c_num,
+                        first_name=rc.get("first_name", ""),
+                        last_name=rc.get("last_name", ""),
+                        title_pre=rc.get("title_pre", ""),
+                        title_post=rc.get("title_post", ""),
+                        party_name=party_name or rc.get("party_name"),
+                        party_id=party_id,
+                        nominating_party=rc.get("nominating_party") or None,
+                        political_affiliation=rc.get("political_affiliation") or None,
+                        age=rc.get("age"),
+                        occupation=rc.get("occupation") or None,
+                        votes=0,
+                        votes_pct=0.0,
+                        is_elected=False,
+                        order_elected=None,
+                        mandate_status="Bez mandátu",
+                    )
+                    party_candidates.append(cand)
 
             # Sort party candidates: elected first, then by votes descending
             party_candidates.sort(

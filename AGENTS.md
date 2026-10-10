@@ -40,7 +40,7 @@ Agent má k dispozici 8 nástrojů vystavených přes MCP i REST:
 | `get_election_overview` | Celostátní souhrn voleb, účast a tempo sčítání v ČR pro Senát (vč. 2. kola) i obce. |
 | `get_senate_results` | Výsledky za všech 27 obvodů nebo konkrétní obvod (číslo 3..81 nebo název). Obsahuje strany, obě kola i marže. |
 | `get_senate_district_breakdown` | Geografický rozpad senátního obvodu po jednotlivých obcích v obvodu (lokální lídři, strany, polarizace město vs. venkov). |
-| `get_municipal_results` | Výsledky konkrétního města/obce (všech 6 396 obcí ČR): mandáty, většina `majority_seats`, propadlé hlasy `wasted_votes_pct`, jmenný seznam kandidátů (hlasy/křížky) a zvolení zastupitelé (`elected_representatives`). |
+| `get_municipal_results` | Výsledky konkrétního města/obce (všech 6 396 obcí ČR): mandáty, většina `majority_seats`, propadlé hlasy `wasted_votes_pct`, kompletní kandidátní listiny včetně stranické příslušnosti (`political_affiliation`), navrhující strany, věku, povolání, přednostních hlasů (křížků) a zvolení zastupitelé (`elected_representatives`). |
 | `get_coalition_scenarios` | Koaliční matematika pro zastupitelstvo: jednobarevné většiny a minimální vítězné koalice (MWC). |
 | `search_municipality_or_district` | Vyhledání kódu obce nebo čísla senátního obvodu dle textového dotazu (odolné vůči diakritice). |
 | `get_live_counting_progress` | Rychlost a dynamika sčítání v čase (okrsky za minutu, průběžný analytický komentář). |
@@ -56,7 +56,7 @@ Při jakýchkoliv úpravách tohoto repozitáře musí agenti dodržovat:
    ```bash
    pytest tests/ -v
    ```
-   Veškeré unit a integrační testy musí projít bez varování a chyb (34+ testů).
+   Veškeré unit a integrační testy musí projít bez varování a chyb (37+ testů).
 2. **Zachování integrity dat ČSÚ:**
    - ČSÚ nepoužívá vedoucí nuly pro senátní obvody v URL rozpadu: `vysledky_obce_obvod_{district_num}.xml`.
    - V číselnících otevřených dat (`kvcoco.json`) je klíč `"polozky"` bez diakritiky.

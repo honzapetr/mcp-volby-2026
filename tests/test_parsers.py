@@ -576,3 +576,104 @@ def test_parse_precinct_batch_senat():
     assert p.precinct_number == 1
     assert p.processed_at == "2026-10-10T15:30:00"
 
+
+def test_parse_municipal_results_with_party_candidates_during_counting():
+    """Verifies that when XML has no candidate sub-elements (counting in progress),
+    candidates are populated from candidate registry with party affiliations."""
+    IN_PROGRESS_XML = """<?xml version="1.0" encoding="utf-8"?>
+    <VYSLEDKY_OBEC xmlns="http://www.volby.cz/kv/" DATUM_CAS_GENEROVANI="2026-10-10T17:00:00">
+      <OBEC KODZASTUP="560758" NAZEVZAST="Bor" OZNAC_TYPU="OBEC" VOLENO_ZASTUP="15" POCET_OBVODU="1" JE_SPOCTENO="0">
+        <VYSLEDEK>
+          <UCAST OKRSKY_CELKEM="3" OKRSKY_ZPRAC="1" OKRSKY_ZPRAC_PROC="33.33" ZAPSANI_VOLICI="1000" VYDANE_OBALKY="500" UCAST_PROC="50.00" PLATNE_HLASY="5000"/>
+          <VOLEBNI_STRANA POR_STR_HLAS_LIST="5" VSTRANA="470" NAZEV_STRANY="BOR NÁS SPOJUJE" HLASY="2000" HLASY_PROC="40.00" KANDIDATU_POCET="2" ZASTUPITELE_POCET="0" ZASTUPITELE_PROC="0.00"/>
+        </VYSLEDEK>
+      </OBEC>
+    </VYSLEDKY_OBEC>
+    """
+    registry = {
+        ("560758", 5, 1): {
+            "first_name": "Petr",
+            "last_name": "Myslivec",
+            "title_pre": "Ing.",
+            "title_post": "",
+            "party_name": "BOR NÁS SPOJUJE",
+            "nominating_party": "STAN",
+            "political_affiliation": "BezPP",
+            "age": 57,
+            "occupation": "obchodní ředitel",
+        },
+        ("560758", 5, 2): {
+            "first_name": "František",
+            "last_name": "Vokroj",
+            "title_pre": "Mgr.",
+            "title_post": "",
+            "party_name": "BOR NÁS SPOJUJE",
+            "nominating_party": "NK",
+            "political_affiliation": "BezPP",
+            "age": 50,
+            "occupation": "vedoucí oddělení",
+        },
+    }
+    root = ET.fromstring(IN_PROGRESS_XML)
+    res = parse_municipal_results(root, candidate_registry=registry)
+
+    assert res.is_completed is False
+    p = res.parties[0]
+    assert len(p.candidates) == 2
+    c1 = p.candidates[0]
+    assert c1.candidate_number == 1
+    assert c1.first_name == "Petr"
+    assert c1.last_name == "Myslivec"
+    assert c1.nominating_party == "STAN"
+    assert c1.political_affiliation == "BezPP"
+    assert c1.age == 57
+    assert c1.occupation == "obchodní ředitel"
+    assert c1.is_elected is False
+    assert c1.mandate_status == "Bez mandátu"
+    assert c1.votes == 0
+
+    c2 = p.candidates[1]
+    assert c2.candidate_number == 2
+    assert c2.first_name == "František"
+    assert c2.last_name == "Vokroj"
+    assert c2.nominating_party == "NK"
+    assert c2.political_affiliation == "BezPP"
+
+
+def test_parse_municipal_candidate_enrichment_from_registry():
+    """Verifies that when XML has candidate elements, political_affiliation, nominating_party,
+    age, and occupation are enriched from candidate registry."""
+    XML_WITH_CANDIDATE = """<?xml version="1.0" encoding="utf-8"?>
+    <VYSLEDKY_OBEC xmlns="http://www.volby.cz/kv/" DATUM_CAS_GENEROVANI="2026-10-10T19:00:00">
+      <OBEC KODZASTUP="560758" NAZEVZAST="Bor" OZNAC_TYPU="OBEC" VOLENO_ZASTUP="1" POCET_OBVODU="1" JE_SPOCTENO="1">
+        <VYSLEDEK>
+          <UCAST OKRSKY_CELKEM="3" OKRSKY_ZPRAC="3" OKRSKY_ZPRAC_PROC="100.00" ZAPSANI_VOLICI="1000" VYDANE_OBALKY="500" UCAST_PROC="50.00" PLATNE_HLASY="500"/>
+          <VOLEBNI_STRANA POR_STR_HLAS_LIST="6" VSTRANA="1804" NAZEV_STRANY="SPD" HLASY="500" HLASY_PROC="100.00" KANDIDATU_POCET="1" ZASTUPITELE_POCET="1" ZASTUPITELE_PROC="100.00">
+            <ZASTUPITEL PORADOVE_CISLO="1" JMENO="Michael" PRIJMENI="Skupien" HLASY="500" HLASY_PROC="100.00" MANDAT="A" PORADI_ZVOLENI="1"/>
+          </VOLEBNI_STRANA>
+        </VYSLEDEK>
+      </OBEC>
+    </VYSLEDKY_OBEC>
+    """
+    registry = {
+        ("560758", 6, 1): {
+            "political_affiliation": "SPD",
+            "nominating_party": "SPD",
+            "age": 44,
+            "occupation": "živnostník",
+        }
+    }
+    root = ET.fromstring(XML_WITH_CANDIDATE)
+    res = parse_municipal_results(root, candidate_registry=registry)
+
+    assert res.is_completed is True
+    assert len(res.elected_representatives) == 1
+    elected = res.elected_representatives[0]
+    assert elected.first_name == "Michael"
+    assert elected.last_name == "Skupien"
+    assert elected.political_affiliation == "SPD"
+    assert elected.nominating_party == "SPD"
+    assert elected.age == 44
+    assert elected.occupation == "živnostník"
+
+
