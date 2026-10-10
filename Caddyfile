@@ -1,0 +1,7 @@
+{$DOMAIN:localhost} {
+    encode gzip zstd
+
+    reverse_proxy mcp-volby:8088 {
+        flush_interval -1
+    }
+}
