@@ -182,3 +182,30 @@ class CountingProgressResponse(BaseModel):
     senate_pct: float = Field(description="% sečtených okrsků Senát")
     municipal_pct: float = Field(description="% sečtených okrsků Obce")
     status_message: str = Field(description="Informativní zpráva o stavu sčítání")
+
+
+class PrecinctTimingResult(BaseModel):
+    """Timing and submission information for an individual electoral precinct (okrsek)."""
+    precinct_number: int = Field(description="Číslo volebního okrsku")
+    municipality_code: str = Field(description="Kód obce ČSÚ (KODZASTUP / CIS_OBEC)")
+    municipality_name: Optional[str] = Field(default=None, description="Název obce / města")
+    district_number: Optional[int] = Field(default=None, description="Číslo senátního obvodu (pro Senát)")
+    processed_at: str = Field(description="Oficiální čas schválení a zpracování zápisu komise na přebíracím místě ČSÚ (ISO 8601)")
+    processing_order: int = Field(default=1, description="Pořadí zpracování (PORADI_ZPRAC)")
+    is_repeated: bool = Field(default=False, description="Zda šlo o opravné/opakované zpracování")
+    registered_voters: int = Field(default=0, description="Počet zapsaných voličů v okrsku")
+    issued_envelopes: int = Field(default=0, description="Počet vydaných úředních obálek")
+    turnout_pct: float = Field(default=0.0, description="Volební účast v okrsku v procentech")
+    valid_votes: int = Field(default=0, description="Počet platných hlasů")
+
+
+class PrecinctSpeedResponse(BaseModel):
+    """Response containing precinct processing timing and commission rankings."""
+    election_type: str = Field(description="Typ voleb: 'obce' nebo 'senat'")
+    order: str = Field(description="Řazení: 'slowest' (nejpomalejší komise) nebo 'fastest' (nejrychlejší komise)")
+    filter_applied: Optional[str] = Field(default=None, description="Aplikovaný filtr (obec, senátní obvod nebo celostátní)")
+    total_precincts_found: int = Field(description="Celkový počet nalezených okrsků vyhovujících filtru")
+    generated_at: str = Field(description="Čas vygenerování dat dávky ČSÚ")
+    precincts: List[PrecinctTimingResult] = Field(description="Seznam okrsků s časy zpracování seřazených dle zadaného pořadí")
+    summary_message: str = Field(description="Analytické textové shrnutí rychlosti odevzdání výsledků")
+

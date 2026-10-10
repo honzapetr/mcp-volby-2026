@@ -94,8 +94,10 @@ V konfiguračním souboru Cursor MCP (`~/.cursor/mcp.json` nebo v nastavení IDE
 | `get_coalition_scenarios` | `obec` *(povinný: str)* | Povolební koaliční matematika pro zastupitelstvo: jednobarevné většiny a minimální vítězné koalice (**MWC** dle Rikerovy teorie). |
 | `search_municipality_or_district` | `query` *(povinný)*, `limit` *(výchozí 15)* | Inteligentní vyhledávač všech 6 396 obcí, městských částí a 27 senátních obvodů bez ohledu na diakritiku a velikost písmen. |
 | `get_live_counting_progress` | *žádné* | Telemetrie a rychlost sčítání: tempo zpracování okrsků a textová zpráva o aktuálním průběhu. |
+| `get_precinct_counting_speed` | `election_type`, `order`, `obec`, `obvod`, `okrsek`, `limit` | Zjištění časů odevzdání a zpracování spočtených hlasů z jednotlivých volebních okrsků (`DATUM_CAS_ZPRAC`). Umožňuje najít nejpomalejší i nejrychlejší volební komise v ČR, v konkrétní obci nebo v senátním obvodu. |
 
 ---
+
 
 ## 🧠 AI Skill: Analýza voleb v ČR (`czech-elections-analyst`)
 
@@ -214,7 +216,7 @@ src/
 │   ├── __init__.py
 │   ├── routes_rest.py        # REST API router (OpenAPI / Swagger / ChatGPT Actions)
 │   └── routes_mcp.py         # MCP router (SSE a Streamable HTTP protokoly)
-├── parsers/                  # Parsování XML dat ČSÚ a fulltextový vyhledávací index
+├── parsers/                  # Parsování XML dat ČSÚ (Senát, obce, dávky okrsků) a vyhledávací index
 ├── config.py                 # Centralizovaná konfigurace přes Pydantic Settings
 ├── server.py                 # Štíhlá Application Factory (85 řádků)
 └── cli.py                    # CLI rozhraní pro spuštění přes stdio i HTTP
@@ -229,11 +231,13 @@ src/
 pytest tests/ -v
 ```
 
-Testy pokrývají:
-- Parsování živých struktur ČSÚ (Senát, obce, celá ČR).
-- Hraniční stavy: vítěz v 1. kole (>50 %) vs postup do 2. kola.
+Testy (34 testů) pokrývají:
+- Parsování živých struktur ČSÚ (Senát, obce, celá ČR, dávky okrsků).
+- Hraniční stavy: vítěz v 1. kole (>50 %) vs postup do 2. kola, panašování a preferenční hlasy.
+- Sledování rychlosti sčítání a časů odevzdání hlasů z okrsků (`DATUM_CAS_ZPRAC`), hledání nejpomalejších/nejrychlejších komisí.
 - Normalizaci diakritiky a fulltextové vyhledávání obcí i obvodů.
 - Integrační testy FastAPI a obou MCP transportů (SSE i Streamable HTTP JSON-RPC).
+
 
 ---
 

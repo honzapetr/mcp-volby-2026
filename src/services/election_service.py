@@ -16,12 +16,15 @@ from src.models import (
     CountingProgressResponse,
     ElectionOverviewResponse,
     MunicipalResultResponse,
+    PrecinctSpeedResponse,
+    PrecinctTimingResult,
     SearchResultResponse,
     SenateDistrictBreakdownResponse,
     SenateOverviewResponse,
 )
 from src.parsers.codebook_loader import codebook_index
 from src.parsers.kv_parser import parse_kv_cr_overview, parse_municipal_results
+from src.parsers.precinct_parser import parse_precinct_batch
 from src.parsers.senat_parser import parse_senate_district_breakdown, parse_senate_results
 
 logger = logging.getLogger(__name__)
@@ -33,6 +36,7 @@ class ElectionService:
     def __init__(self):
         self._csu = csu_client
         self._codebooks = codebook_index
+        self._precinct_registry: dict = {}
 
     async def initialize(self) -> None:
         """Initializes codebooks on application startup."""
@@ -275,6 +279,124 @@ class ElectionService:
             status_message=status_msg,
         )
 
+    async def get_precinct_speed(
+        self,
+        election_type: str = "obce",
+        order: str = "slowest",
+        obec: Optional[str | int] = None,
+        obvod: Optional[str | int] = None,
+        okrsek: Optional[int] = None,
+        limit: int = 10,
+    ) -> PrecinctSpeedResponse:
+        """Returns precinct submission and counting timing metrics, slowest/fastest commissions."""
+        election_type_norm = "senat" if "senat" in str(election_type).lower() else "obce"
+        order_norm = "fastest" if str(order).lower() in ("fastest", "nejrychlejsi", "fast", "rychle") else "slowest"
+        limit_bounded = max(1, min(limit, 100))
+
+        # Map known municipality names
+        muni_map = {kod: item.name for kod, item in self._codebooks.municipalities.items()}
+
+        # Fetch latest batch from CSU (gracefully handled if unavailable yet)
+        batch_generated_at = ""
+        try:
+            if election_type_norm == "senat":
+                xml_root = await self._csu.get_senat_okrsky()
+            else:
+                xml_root = await self._csu.get_kv_okrsky()
+            batch_generated_at, batch_precincts = parse_precinct_batch(
+                xml_root, election_type=election_type_norm, municipality_names=muni_map
+            )
+            for p in batch_precincts:
+                reg_key = (election_type_norm, p.municipality_code, p.precinct_number)
+                if reg_key not in self._precinct_registry or p.processing_order >= self._precinct_registry[reg_key].processing_order:
+                    self._precinct_registry[reg_key] = p
+        except Exception as exc:
+            logger.warning("Could not fetch okrsky batch from CSU for %s: %s", election_type_norm, exc)
+
+        # Filter registry by election type
+        matching_precincts = [
+            p for (etype, _, _), p in self._precinct_registry.items()
+            if etype == election_type_norm
+        ]
+
+        # Apply municipality name backfill if missing
+        for p in matching_precincts:
+            if not p.municipality_name and p.municipality_code in muni_map:
+                p.municipality_name = muni_map[p.municipality_code]
+
+        filter_parts = []
+
+        # Filter by municipality if requested
+        if obec is not None:
+            kod = self._codebooks.resolve_municipality_code(obec)
+            if not kod:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Obec '{obec}' nebyla nalezena v číselníku.",
+                )
+            muni_name = muni_map.get(kod, str(obec))
+            matching_precincts = [p for p in matching_precincts if p.municipality_code == kod]
+            filter_parts.append(f"Obec: {muni_name} ({kod})")
+
+        # Filter by Senate district if requested
+        if obvod is not None:
+            dist_num = self._codebooks.resolve_senate_district(obvod)
+            if dist_num is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Senátní obvod '{obvod}' nebyl nalezen.",
+                )
+            dist_obj = self._codebooks.senate_districts.get(dist_num)
+            dist_name = dist_obj.name if dist_obj else f"Obvod č. {dist_num}"
+            matching_precincts = [p for p in matching_precincts if p.district_number == dist_num]
+            filter_parts.append(f"Senátní obvod: č. {dist_num} ({dist_name})")
+
+        # Filter by precinct number if requested
+        if okrsek is not None:
+            try:
+                okrsek_int = int(okrsek)
+                matching_precincts = [p for p in matching_precincts if p.precinct_number == okrsek_int]
+                filter_parts.append(f"Okrsek č. {okrsek_int}")
+            except (ValueError, TypeError):
+                pass
+
+        filter_applied = ", ".join(filter_parts) if filter_parts else "Celá ČR"
+
+        # Sort precincts by processed_at timestamp
+        reverse_sort = (order_norm == "slowest")
+        matching_precincts.sort(key=lambda p: (p.processed_at or "", p.processing_order), reverse=reverse_sort)
+
+        total_found = len(matching_precincts)
+        selected_precincts = matching_precincts[:limit_bounded]
+
+        # Construct analytical summary message
+        if not selected_precincts:
+            summary_msg = (
+                f"Pro zadaná kritéria ({filter_applied}) nebyly nalezeny žádné zpracované okrsky. "
+                "Data sčítání pro tyto okrsky prozatím nemusí být v otevřených datech ČSÚ zpracována."
+            )
+        else:
+            lead = selected_precincts[0]
+            lead_muni = lead.municipality_name or f"kód {lead.municipality_code}"
+            lead_time = lead.processed_at.split("T")[-1] if "T" in lead.processed_at else (lead.processed_at or "neznámý čas")
+            speed_label = "Nejpomalejší" if order_norm == "slowest" else "Nejrychlejší"
+            summary_msg = (
+                f"{speed_label} evidovaná komise ({filter_applied}): okrsek č. {lead.precinct_number} "
+                f"v obci {lead_muni} — čas zpracování {lead_time} "
+                f"(volební účast {lead.turnout_pct:.1f} %, odevzdáno {lead.issued_envelopes} obálek)."
+            )
+
+        return PrecinctSpeedResponse(
+            election_type=election_type_norm,
+            order=order_norm,
+            filter_applied=filter_applied,
+            total_precincts_found=total_found,
+            generated_at=batch_generated_at or datetime.datetime.now().isoformat(),
+            precincts=selected_precincts,
+            summary_message=summary_msg,
+        )
+
 
 # Global singleton service
 election_service = ElectionService()
+

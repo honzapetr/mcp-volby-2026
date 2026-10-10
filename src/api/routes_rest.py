@@ -12,6 +12,7 @@ from src.models import (
     CountingProgressResponse,
     ElectionOverviewResponse,
     MunicipalResultResponse,
+    PrecinctSpeedResponse,
     SearchResultResponse,
     SenateDistrictBreakdownResponse,
     SenateOverviewResponse,
@@ -121,3 +122,29 @@ async def api_search(
 async def api_progress():
     """Aktuální tempo a průběh sčítání hlasů."""
     return await election_service.get_progress()
+
+
+@router.get(
+    "/api/okrsky/rychlost",
+    response_model=PrecinctSpeedResponse,
+    tags=["Okrsky a sčítání 2026"],
+    dependencies=[Depends(verify_auth)],
+)
+async def api_precinct_speed(
+    election_type: str = Query("obce", description="Typ voleb: 'obce' nebo 'senat'"),
+    order: str = Query("slowest", description="Řazení: 'slowest' (nejpomalejší komise) nebo 'fastest' (nejrychlejší komise)"),
+    obec: Optional[str] = Query(None, description="Filtr pro konkrétní obec (název nebo kód ČSÚ)"),
+    obvod: Optional[str] = Query(None, description="Filtr pro senátní obvod (číslo nebo sídlo)"),
+    okrsek: Optional[int] = Query(None, description="Konkrétní číslo volebního okrsku"),
+    limit: int = Query(10, ge=1, le=100, description="Maximální počet vrácených okrsků"),
+):
+    """Zjišťuje časy zpracování a odevzdání zápisů okrskových volebních komisí (nejpomalejší/nejrychlejší komise)."""
+    return await election_service.get_precinct_speed(
+        election_type=election_type,
+        order=order,
+        obec=obec,
+        obvod=obvod,
+        okrsek=okrsek,
+        limit=limit,
+    )
+

@@ -137,6 +137,48 @@ async def handle_list_tools() -> list[Tool]:
                 "required": ["obec"],
             },
         ),
+        Tool(
+            name="get_precinct_counting_speed",
+            description=(
+                "Získá časy odevzdání a zpracování spočtených hlasů z volebních okrsků (v kolik hodin komise odevzdala hlasy "
+                "a ČSÚ schválil zápis). Umožňuje identifikovat nejpomalejší i nejrychlejší volební komise v ČR, v konkrétní "
+                "obci (např. 'Praha') nebo v senátním obvodu, případně zjistit čas zpracování konkrétního okrsku."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "election_type": {
+                        "type": "string",
+                        "description": "Typ voleb: 'obce' (komunální volby, výchozí) nebo 'senat' (volby do Senátu).",
+                        "enum": ["obce", "senat"],
+                        "default": "obce",
+                    },
+                    "order": {
+                        "type": "string",
+                        "description": "Řazení výsledků: 'slowest' (nejpomalejší komise jako první, výchozí) nebo 'fastest' (nejrychlejší komise jako první).",
+                        "enum": ["slowest", "fastest"],
+                        "default": "slowest",
+                    },
+                    "obec": {
+                        "type": "string",
+                        "description": "Volitelné: název obce (např. 'Praha', 'Brno') nebo 6místný kód obce ČSÚ pro filtraci okrsků dané obce.",
+                    },
+                    "obvod": {
+                        "type": ["string", "integer"],
+                        "description": "Volitelné: číslo senátního obvodu (např. 3) nebo sídlo (např. 'Cheb') pro filtraci okrsků daného obvodu.",
+                    },
+                    "okrsek": {
+                        "type": "integer",
+                        "description": "Volitelné: konkrétní číslo volebního okrsku pro zjištění času jeho zpracování.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximální počet vrácených okrsků (výchozí 10, maximum 100).",
+                        "default": 10,
+                    },
+                },
+            },
+        ),
     ]
 
 
@@ -184,6 +226,23 @@ async def handle_call_tool(name: str, arguments: dict) -> list[TextContent]:
             res = await election_service.get_coalition_scenarios(obec)
             return [TextContent(type="text", text=res.model_dump_json(indent=2))]
 
+        elif name == "get_precinct_counting_speed":
+            election_type = arguments.get("election_type", "obce")
+            order = arguments.get("order", "slowest")
+            obec = arguments.get("obec")
+            obvod = arguments.get("obvod")
+            okrsek = arguments.get("okrsek")
+            limit = int(arguments.get("limit", 10))
+            res = await election_service.get_precinct_speed(
+                election_type=election_type,
+                order=order,
+                obec=obec,
+                obvod=obvod,
+                okrsek=okrsek,
+                limit=limit,
+            )
+            return [TextContent(type="text", text=res.model_dump_json(indent=2))]
+
         else:
             return [TextContent(type="text", text=f"Chyba: Neznámý nástroj '{name}'.")]
 
@@ -192,3 +251,4 @@ async def handle_call_tool(name: str, arguments: dict) -> list[TextContent]:
     except Exception as exc:
         logger.exception("Chyba při volání nástroje %s: %s", name, exc)
         return [TextContent(type="text", text=f"Interní chyba při zpracování požadavku: {exc}")]
+

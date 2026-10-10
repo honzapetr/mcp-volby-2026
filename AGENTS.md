@@ -33,7 +33,7 @@ Pokud jako AI asistent pracujete s tímto repozitářem nebo odpovídáte uživa
 
 ## 2. Přehled MCP nástrojů v repozitáři
 
-Agent má k dispozici 7 nástrojů vystavených přes MCP i REST:
+Agent má k dispozici 8 nástrojů vystavených přes MCP i REST:
 
 | Nástroj | Kdy použít |
 |---|---|
@@ -44,6 +44,7 @@ Agent má k dispozici 7 nástrojů vystavených přes MCP i REST:
 | `get_coalition_scenarios` | Koaliční matematika pro zastupitelstvo: jednobarevné většiny a minimální vítězné koalice (MWC). |
 | `search_municipality_or_district` | Vyhledání kódu obce nebo čísla senátního obvodu dle textového dotazu (odolné vůči diakritice). |
 | `get_live_counting_progress` | Rychlost a dynamika sčítání v čase (okrsky za minutu, průběžný analytický komentář). |
+| `get_precinct_counting_speed` | Časy zpracování a odevzdání spočtených hlasů z volebních okrsků (`DATUM_CAS_ZPRAC`). Umožňuje najít nejpomalejší i nejrychlejší volební komise v ČR, v obci nebo v senátním obvodu. |
 
 ---
 
@@ -55,7 +56,7 @@ Při jakýchkoliv úpravách tohoto repozitáře musí agenti dodržovat:
    ```bash
    pytest tests/ -v
    ```
-   Veškeré unit a integrační testy musí projít bez varování a chyb (27+ testů).
+   Veškeré unit a integrační testy musí projít bez varování a chyb (34+ testů).
 2. **Zachování integrity dat ČSÚ:**
    - ČSÚ nepoužívá vedoucí nuly pro senátní obvody v URL rozpadu: `vysledky_obce_obvod_{district_num}.xml`.
    - V číselnících otevřených dat (`kvcoco.json`) je klíč `"polozky"` bez diakritiky.

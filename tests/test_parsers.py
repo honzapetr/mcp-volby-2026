@@ -491,3 +491,88 @@ def test_parse_municipal_results_with_candidate_registry():
     assert elected.title_pre == "Ing."
     assert elected.is_elected is True
     assert elected.votes == 5000
+
+
+def test_parse_precinct_batch_municipal():
+    """Verifies parsing of municipal precinct batch XML and timing attributes."""
+    from src.parsers.precinct_parser import parse_precinct_batch
+
+    MOCK_PRECINCT_XML = """<?xml version="1.0" encoding="utf-8"?>
+    <VYSLEDKY_OKRSKY xmlns="http://www.volby.cz/kv/" DATUM_CAS_GENEROVANI="2026-10-10T17:30:00">
+      <DAVKA PORADI="1"/>
+      <OKRSEK CIS_OBEC="554782" CIS_OKRSEK="101" KODZASTUP="554782" PORADI_ZPRAC="1" DATUM_CAS_ZPRAC="2026-10-10T15:15:20" OPAKOVANE="0">
+        <UCAST_OKRSEK ZAPSANI_VOLICI="800" VYDANE_OBALKY="400" ODEVZDANE_OBALKY="398" PLATNE_HLASY="390" UCAST_PROC="50.00"/>
+      </OKRSEK>
+      <OKRSEK CIS_OBEC="554782" CIS_OKRSEK="102" KODZASTUP="554782" PORADI_ZPRAC="1" DATUM_CAS_ZPRAC="2026-10-10T17:45:10" OPAKOVANE="0">
+        <UCAST_OKRSEK ZAPSANI_VOLICI="1000" VYDANE_OBALKY="600" ODEVZDANE_OBALKY="595" PLATNE_HLASY="590" UCAST_PROC="60.00"/>
+      </OKRSEK>
+    </VYSLEDKY_OKRSKY>
+    """
+    root = ET.fromstring(MOCK_PRECINCT_XML)
+    muni_map = {"554782": "Praha"}
+    gen_at, precincts = parse_precinct_batch(root, election_type="obce", municipality_names=muni_map)
+
+    assert gen_at == "2026-10-10T17:30:00"
+    assert len(precincts) == 2
+
+    p101 = next(p for p in precincts if p.precinct_number == 101)
+    assert p101.municipality_code == "554782"
+    assert p101.municipality_name == "Praha"
+    assert p101.processed_at == "2026-10-10T15:15:20"
+    assert p101.processing_order == 1
+    assert p101.is_repeated is False
+    assert p101.turnout_pct == 50.00
+    assert p101.issued_envelopes == 400
+
+    p102 = next(p for p in precincts if p.precinct_number == 102)
+    assert p102.processed_at == "2026-10-10T17:45:10"
+    assert p102.turnout_pct == 60.00
+
+
+def test_parse_precinct_batch_deduplication():
+    """Verifies that an okrsek repeated with higher PORADI_ZPRAC overrides previous data."""
+    from src.parsers.precinct_parser import parse_precinct_batch
+
+    MOCK_REPEATED_XML = """<?xml version="1.0" encoding="utf-8"?>
+    <VYSLEDKY_OKRSKY xmlns="http://www.volby.cz/kv/" DATUM_CAS_GENEROVANI="2026-10-10T18:00:00">
+      <OKRSEK CIS_OBEC="560715" CIS_OKRSEK="5" PORADI_ZPRAC="1" DATUM_CAS_ZPRAC="2026-10-10T15:00:00" OPAKOVANE="0">
+        <UCAST_OKRSEK ZAPSANI_VOLICI="500" VYDANE_OBALKY="200" PLATNE_HLASY="195"/>
+      </OKRSEK>
+      <OKRSEK CIS_OBEC="560715" CIS_OKRSEK="5" PORADI_ZPRAC="2" DATUM_CAS_ZPRAC="2026-10-10T16:45:00" OPAKOVANE="1">
+        <UCAST_OKRSEK ZAPSANI_VOLICI="500" VYDANE_OBALKY="250" PLATNE_HLASY="245"/>
+      </OKRSEK>
+    </VYSLEDKY_OKRSKY>
+    """
+    root = ET.fromstring(MOCK_REPEATED_XML)
+    gen_at, precincts = parse_precinct_batch(root, election_type="obce")
+
+    assert len(precincts) == 1
+    p = precincts[0]
+    assert p.precinct_number == 5
+    assert p.processing_order == 2
+    assert p.is_repeated is True
+    assert p.processed_at == "2026-10-10T16:45:00"
+    assert p.issued_envelopes == 250
+
+
+def test_parse_precinct_batch_senat():
+    """Verifies parsing of Senate precinct batch XML with CIS_OBVOD."""
+    from src.parsers.precinct_parser import parse_precinct_batch
+
+    MOCK_SENAT_OKRSKY_XML = """<?xml version="1.0" encoding="utf-8"?>
+    <VYSLEDKY_OKRSKY xmlns="http://www.volby.cz/senat/" DATUM_CAS_GENEROVANI="2026-10-10T16:00:00">
+      <OKRSEK CIS_OBEC="560715" CIS_OKRSEK="1" CIS_OBVOD="3" PORADI_ZPRAC="1" DATUM_CAS_ZPRAC="2026-10-10T15:30:00" OPAKOVANE="0">
+        <UCAST_OKRSEK ZAPSANI_VOLICI="600" VYDANE_OBALKY="180" PLATNE_HLASY="175"/>
+      </OKRSEK>
+    </VYSLEDKY_OKRSKY>
+    """
+    root = ET.fromstring(MOCK_SENAT_OKRSKY_XML)
+    gen_at, precincts = parse_precinct_batch(root, election_type="senat")
+
+    assert len(precincts) == 1
+    p = precincts[0]
+    assert p.district_number == 3
+    assert p.municipality_code == "560715"
+    assert p.precinct_number == 1
+    assert p.processed_at == "2026-10-10T15:30:00"
+

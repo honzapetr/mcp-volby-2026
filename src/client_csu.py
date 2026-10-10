@@ -160,6 +160,37 @@ class CSUClient:
         url = f"{self.base_url}/appdata/{settings.KV_VERSION}/{settings.KV_ELECTION_CODE}/odata/okresy/vysledky_obce_okres_{nuts_clean}.xml"
         return await self.get_xml(url)
 
+    async def get_senat_okrsky(self, davka: Optional[int] = None) -> ET.Element:
+        """Returns precinct-level batch XML for Senate elections."""
+        if davka is not None:
+            batch_num = str(davka).zfill(5)
+            url = f"{self.base_url}/appdata/senat/{settings.SENAT_ELECTION_CODE}/odata/okrsky/vysledky_okrsky_{batch_num}.xml"
+            return await self.get_xml(url)
+
+        # Try default /odata/okrsky/vysledky_okrsky.xml, with fallback to /odata/vysledky_okrsky.xml
+        primary_url = f"{self.base_url}/appdata/senat/{settings.SENAT_ELECTION_CODE}/odata/okrsky/vysledky_okrsky.xml"
+        try:
+            return await self.get_xml(primary_url)
+        except Exception:
+            fallback_url = f"{self.base_url}/appdata/senat/{settings.SENAT_ELECTION_CODE}/odata/vysledky_okrsky.xml"
+            return await self.get_xml(fallback_url)
+
+    async def get_kv_okrsky(self, davka: Optional[int] = None) -> ET.Element:
+        """Returns precinct-level batch XML for Municipal elections."""
+        if davka is not None:
+            batch_num = str(davka).zfill(5)
+            url = f"{self.base_url}/appdata/{settings.KV_VERSION}/{settings.KV_ELECTION_CODE}/odata/okrsky/vysledky_okrsky_{batch_num}.xml"
+            return await self.get_xml(url)
+
+        # Try default /odata/okrsky/vysledky_okrsky.xml, with fallback to /odata/vysledky_okrsky.xml
+        primary_url = f"{self.base_url}/appdata/{settings.KV_VERSION}/{settings.KV_ELECTION_CODE}/odata/okrsky/vysledky_okrsky.xml"
+        try:
+            return await self.get_xml(primary_url)
+        except Exception:
+            fallback_url = f"{self.base_url}/appdata/{settings.KV_VERSION}/{settings.KV_ELECTION_CODE}/odata/vysledky_okrsky.xml"
+            return await self.get_xml(fallback_url)
+
 
 # Global singleton client
 csu_client = CSUClient()
+

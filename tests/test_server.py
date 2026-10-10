@@ -12,6 +12,32 @@ from tests.test_parsers import (
 )
 
 
+MOCK_KV_OKRSKY_XML = """<?xml version="1.0" encoding="utf-8"?>
+<VYSLEDKY_OKRSKY xmlns="http://www.volby.cz/kv/" DATUM_CAS_GENEROVANI="2026-10-10T19:00:00">
+  <OKRSEK CIS_OBEC="554782" CIS_OKRSEK="1" KODZASTUP="554782" PORADI_ZPRAC="1" DATUM_CAS_ZPRAC="2026-10-10T14:45:00" OPAKOVANE="0">
+    <UCAST_OKRSEK ZAPSANI_VOLICI="800" VYDANE_OBALKY="400" PLATNE_HLASY="395" UCAST_PROC="50.00"/>
+  </OKRSEK>
+  <OKRSEK CIS_OBEC="554782" CIS_OKRSEK="2" KODZASTUP="554782" PORADI_ZPRAC="1" DATUM_CAS_ZPRAC="2026-10-10T18:30:00" OPAKOVANE="0">
+    <UCAST_OKRSEK ZAPSANI_VOLICI="900" VYDANE_OBALKY="550" PLATNE_HLASY="540" UCAST_PROC="61.11"/>
+  </OKRSEK>
+  <OKRSEK CIS_OBEC="560715" CIS_OKRSEK="10" KODZASTUP="560715" PORADI_ZPRAC="1" DATUM_CAS_ZPRAC="2026-10-10T16:15:00" OPAKOVANE="0">
+    <UCAST_OKRSEK ZAPSANI_VOLICI="300" VYDANE_OBALKY="150" PLATNE_HLASY="145" UCAST_PROC="50.00"/>
+  </OKRSEK>
+</VYSLEDKY_OKRSKY>
+"""
+
+MOCK_SENAT_OKRSKY_XML = """<?xml version="1.0" encoding="utf-8"?>
+<VYSLEDKY_OKRSKY xmlns="http://www.volby.cz/senat/" DATUM_CAS_GENEROVANI="2026-10-10T19:00:00">
+  <OKRSEK CIS_OBEC="560715" CIS_OKRSEK="1" CIS_OBVOD="3" PORADI_ZPRAC="1" DATUM_CAS_ZPRAC="2026-10-10T15:20:00" OPAKOVANE="0">
+    <UCAST_OKRSEK ZAPSANI_VOLICI="600" VYDANE_OBALKY="200" PLATNE_HLASY="195" UCAST_PROC="33.33"/>
+  </OKRSEK>
+  <OKRSEK CIS_OBEC="560715" CIS_OKRSEK="2" CIS_OBVOD="3" PORADI_ZPRAC="1" DATUM_CAS_ZPRAC="2026-10-10T17:10:00" OPAKOVANE="0">
+    <UCAST_OKRSEK ZAPSANI_VOLICI="700" VYDANE_OBALKY="250" PLATNE_HLASY="245" UCAST_PROC="35.71"/>
+  </OKRSEK>
+</VYSLEDKY_OKRSKY>
+"""
+
+
 @pytest.fixture
 def client():
     with TestClient(app) as c:
@@ -33,10 +59,19 @@ def mock_csu_calls(monkeypatch):
     async def mock_senat_obvod_obce(district_num):
         return ET.fromstring(MOCK_SENATE_BREAKDOWN_XML)
 
+    async def mock_kv_okrsky(davka=None):
+        return ET.fromstring(MOCK_KV_OKRSKY_XML)
+
+    async def mock_senat_okrsky(davka=None):
+        return ET.fromstring(MOCK_SENAT_OKRSKY_XML)
+
     monkeypatch.setattr(csu_client, "get_senat_vysledky", mock_senat_vysledky)
     monkeypatch.setattr(csu_client, "get_kv_vysledky_cr", mock_kv_vysledky_cr)
     monkeypatch.setattr(csu_client, "get_kv_obec", mock_kv_obec)
     monkeypatch.setattr(csu_client, "get_senat_obvod_obce", mock_senat_obvod_obce)
+    monkeypatch.setattr(csu_client, "get_kv_okrsky", mock_kv_okrsky)
+    monkeypatch.setattr(csu_client, "get_senat_okrsky", mock_senat_okrsky)
+
 
 
 def test_health_check(client):
@@ -201,6 +236,8 @@ def test_jsonrpc_initialize_and_tools(client):
     assert "get_senate_results" in tool_names
     assert "get_senate_district_breakdown" in tool_names
     assert "get_coalition_scenarios" in tool_names
+    assert "get_precinct_counting_speed" in tool_names
+
 
     # Test tools/call on /sse
     call_payload = {
@@ -219,4 +256,58 @@ def test_jsonrpc_initialize_and_tools(client):
     assert data_call["result"]["isError"] is False
     assert len(data_call["result"]["content"]) >= 1
     assert "Praha" in data_call["result"]["content"][0]["text"]
+
+
+def test_api_precinct_speed(client):
+    """Verifies the /api/okrsky/rychlost endpoint for slowest and fastest ranking."""
+    # Test slowest commissions
+    res_slowest = client.get("/api/okrsky/rychlost?election_type=obce&order=slowest")
+    assert res_slowest.status_code == 200
+    data_slow = res_slowest.json()
+    assert data_slow["order"] == "slowest"
+    assert data_slow["election_type"] == "obce"
+    assert len(data_slow["precincts"]) > 0
+    # Okrsek 2 (18:30:00) should be first when ordered by slowest
+    assert data_slow["precincts"][0]["precinct_number"] == 2
+    assert "Nejpomalejší" in data_slow["summary_message"]
+
+    # Test fastest commissions
+    res_fastest = client.get("/api/okrsky/rychlost?election_type=obce&order=fastest")
+    assert res_fastest.status_code == 200
+    data_fast = res_fastest.json()
+    assert data_fast["order"] == "fastest"
+    # Okrsek 1 (14:45:00) should be first when ordered by fastest
+    assert data_fast["precincts"][0]["precinct_number"] == 1
+    assert "Nejrychlejší" in data_fast["summary_message"]
+
+    # Test filtering by municipality and specific precinct number
+    res_filt = client.get("/api/okrsky/rychlost?election_type=obce&obec=Praha&okrsek=1")
+    assert res_filt.status_code == 200
+    data_filt = res_filt.json()
+    assert len(data_filt["precincts"]) == 1
+    assert data_filt["precincts"][0]["precinct_number"] == 1
+    assert data_filt["precincts"][0]["municipality_code"] == "554782"
+
+    # Test Senate precinct filtering
+    res_senat = client.get("/api/okrsky/rychlost?election_type=senat&obvod=3")
+    assert res_senat.status_code == 200
+    data_senat = res_senat.json()
+    assert data_senat["election_type"] == "senat"
+    assert len(data_senat["precincts"]) > 0
+    assert all(p["district_number"] == 3 for p in data_senat["precincts"])
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_precinct_speed_tool():
+    """Verifies calling get_precinct_counting_speed via MCP tool interface."""
+    res = await handle_call_tool(
+        "get_precinct_counting_speed",
+        {"election_type": "obce", "order": "slowest", "obec": "Praha", "limit": 5},
+    )
+    assert len(res) == 1
+    text = res[0].text
+    assert "554782" in text
+    assert "slowest" in text
+    assert "precincts" in text
+
 

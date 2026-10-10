@@ -120,8 +120,10 @@ Server **volby-cr-2026** exponuje následující sadu specializovaných nástroj
 | `get_coalition_scenarios` | `obec` *(povinné: název nebo kód)* | Povolební koaliční matematika: jednobarevné většiny a minimální vítězné koalice (MWC). |
 | `search_municipality_or_district` | `query` *(povinné: str)*, `limit` *(int)* | Vyhledávač obcí a senátních obvodů s tolerancí diakritiky a číselných kódů. |
 | `get_live_counting_progress` | *(žádné)* | Živá telemetrie rychlosti sčítání a průběžný stavový komentář. |
+| `get_precinct_counting_speed` | `election_type`, `order`, `obec`, `obvod`, `okrsek`, `limit` | Zjištění časů odevzdání a schválení zápisů okrskových volebních komisí (`DATUM_CAS_ZPRAC`). Pořadí nejpomalejších i nejrychlejších komisí v ČR, obci či obvodu. |
 
 ---
+
 
 ## 5. Ukázkové analytické pracovní postupy (Workflows)
 
